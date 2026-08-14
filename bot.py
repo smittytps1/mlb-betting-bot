@@ -5,7 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from google import genai
 
-# --- 1. GOOGLE SHEETS AUTHENTICATION & HEADERS ---
+# --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheet():
     print("Connecting to Google Sheets...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -37,12 +37,77 @@ def ensure_headers(sheet):
         except Exception as e:
             print(f"Header formatting notice: {e}")
 
-# --- 2. SELF-LEARNING MEMORY SYSTEM ---
+# --- 2. AUTOMATIC GAME GRADING VIA SCORES API ---
+def auto_grade_pending_bets(sheet, odds_key):
+    """Fetches completed MLB scores and updates PENDING rows in Google Sheet."""
+    records = sheet.get_all_records()
+    if not records:
+        return
+
+    # Check if there are any PENDING rows to grade
+    pending_rows = [i + 2 for i, r in enumerate(records) if str(r.get("Status", "")).upper() == "PENDING"]
+    if not pending_rows:
+        print("No pending bets to grade.")
+        return
+
+    print(f"Checking results for {len(pending_rows)} pending bet(s)...")
+    scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
+    resp = requests.get(scores_url)
+    if resp.status_code != 200:
+        print("Could not fetch score data for auto-grading.")
+        return
+
+    scores_data = resp.json()
+    
+    for row_idx, r in enumerate(records, start=2):
+        if str(r.get("Status", "")).upper() != "PENDING":
+            continue
+
+        game_title = str(r.get("Game", ""))
+        pick = str(r.get("Pick", "")).strip()
+        odds = float(r.get("Odds", -110) or -110)
+        units = float(r.get("Units", 1.0) or 1.0)
+
+        for match in scores_data:
+            if not match.get("completed"):
+                continue
+
+            home_team = match.get("home_team", "")
+            away_team = match.get("away_team", "")
+            
+            # Match game title against score data
+            if home_team in game_title or away_team in game_title:
+                scores = match.get("scores")
+                if not scores or len(scores) < 2:
+                    continue
+
+                home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
+                away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+
+                winner = home_team if home_score > away_score else away_team
+                
+                # Determine Win / Loss
+                is_win = (pick in winner or winner in pick)
+                status = "WIN" if is_win else "LOSS"
+
+                # Calculate P/L ($100 unit base)
+                if is_win:
+                    profit = (100 / abs(odds)) * 100 * units if odds < 0 else (odds / 100) * 100 * units
+                else:
+                    profit = -100.0 * units
+
+                print(f"Graded Row {row_idx}: {game_title} -> {status} (${round(profit, 2)})")
+                sheet.update_cell(row_idx, 10, status)  # Column J: Status
+                sheet.update_cell(row_idx, 11, round(profit, 2))  # Column K: P/L ($)
+
+# --- 3. MEMORY MANAGEMENT & ANALYTICS ---
 def load_memory():
+    """Loads memory file or creates a default one if missing."""
     if os.path.exists("bot_memory.json"):
         with open("bot_memory.json", "r") as f:
             return json.load(f)
-    return {
+    
+    default_memory = {
         "total_bets": 0,
         "wins": 0,
         "losses": 0,
@@ -50,9 +115,12 @@ def load_memory():
         "net_profit_dollars": 0.0,
         "learnings_and_adjustments": "No historical data evaluated yet. Maintain balanced evaluation."
     }
+    with open("bot_memory.json", "w") as f:
+        json.dump(default_memory, f, indent=2)
+    return default_memory
 
 def update_memory_from_sheet(sheet, memory):
-    """Calculates real-time win/loss stats from Google Sheet and saves to memory."""
+    """Calculates real-time stats from Google Sheet and saves back to memory."""
     records = sheet.get_all_records()
     if not records:
         return memory
@@ -71,30 +139,23 @@ def update_memory_from_sheet(sheet, memory):
         memory["win_rate"] = f"{win_rate}%"
         memory["net_profit_dollars"] = round(net_pl, 2)
 
-        # Dynamic strategy guidance based on win rate
         if win_rate < 50.0:
             memory["learnings_and_adjustments"] = (
-                f"Current win rate is {win_rate}% (under 50%). Tighten EV thresholds, "
-                "prioritize moneyline value, reduce risk on high-volatility totals, and favor higher edge margins."
+                f"Current win rate is {win_rate}% (under 50%). Increase EV threshold, "
+                "prioritize high-value moneyline picks, and avoid low-edge totals."
             )
         else:
             memory["learnings_and_adjustments"] = (
                 f"Current win rate is {win_rate}% (profitable). Maintain current quantitative selection criteria."
             )
 
-    # Save updated performance memory back to JSON
     with open("bot_memory.json", "w") as f:
         json.dump(memory, f, indent=2)
 
     return memory
 
-# --- 3. FETCH MLB ODDS ---
-def fetch_mlb_odds():
-    odds_key = os.environ.get("ODDS_API_KEY")
-    if not odds_key:
-        print("ERROR: ODDS_API_KEY environment variable is missing!")
-        return []
-        
+# --- 4. FETCH MLB ODDS ---
+def fetch_mlb_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
     resp = requests.get(url)
@@ -106,13 +167,10 @@ def fetch_mlb_odds():
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 4. GENERATE PICKS WITH REFLECTIVE PROMPT ---
+# --- 5. GENERATE PICKS WITH REFLECTIVE PROMPT ---
 def generate_picks(odds_data, memory):
     print("Sending odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is missing!")
-
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -143,35 +201,28 @@ def generate_picks(odds_data, memory):
 def main():
     sheet = get_sheet()
     ensure_headers(sheet)
+    odds_key = os.environ.get("ODDS_API_KEY")
 
-    # 1. Update memory based on completed bets in Google Sheets
+    # 1. Auto-grade completed games from prior runs
+    auto_grade_pending_bets(sheet, odds_key)
+
+    # 2. Update memory file based on newly graded outcomes
     memory = load_memory()
     updated_memory = update_memory_from_sheet(sheet, memory)
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
-    # 2. Fetch today's odds
-    odds = fetch_mlb_odds()
+    # 3. Fetch today's odds
+    odds = fetch_mlb_odds(odds_key)
 
     if not odds:
-        print("WARNING: No live odds returned. Using fallback test row...")
-        picks = [{
-            "date": "2026-08-14",
-            "game": "Test Game @ Demo Ballpark",
-            "bet_type": "Moneyline",
-            "pick": "Home Team",
-            "odds": -110,
-            "implied_prob": 52.38,
-            "model_prob": 58.00,
-            "expected_value": 10.70,
-            "units": 1.0,
-            "reasoning": "Pipeline self-learning verification"
-        }]
-    else:
-        picks = generate_picks(odds, updated_memory)
+        print("WARNING: No live odds returned. Skipping pick generation.")
+        return
+
+    # 4. Generate adaptive picks
+    picks = generate_picks(odds, updated_memory)
 
     print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets...")
 
-    # 3. Append picks to Google Sheet
     for p in picks:
         sheet.append_row([
             p.get("date", ""),
