@@ -3,19 +3,19 @@ name: MLB AI Betting Pipeline
 on:
   schedule:
     - cron: '0 15 * * *' # Daily at 11:00 AM EDT
-  workflow_dispatch:     # Manual run button
+  workflow_dispatch:     # Enables manual run button
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.4.0
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
