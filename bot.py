@@ -2,6 +2,8 @@ import os
 import json
 import requests
 import gspread
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
 from google import genai
 
@@ -23,11 +25,11 @@ def get_sheet():
     return sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers."""
+    """Ensures row 1 contains bold, frozen column headers with Pulled Time."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
-            "Date", "Game", "Bet Type", "Pick", "Odds", 
+            "Date", "Pulled Time", "Game", "Bet Type", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
             "Status", "P/L ($)", "Reasoning"
         ]
@@ -36,16 +38,16 @@ def ensure_headers(sheet):
             print("Writing column headers...")
             sheet.append_row(headers)
             try:
-                sheet.format("A1:L1", {"textFormat": {"bold": True}})
+                sheet.format("A1:M1", {"textFormat": {"bold": True}})
                 sheet.freeze(rows=1)
             except Exception as e:
                 print(f"Header formatting notice: {e}")
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
-# --- 2. BATCH AUTO-GRADING VIA SCORES API ---
+# --- 2. BATCH AUTO-GRADING WITH DATE SAFEGUARDS ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Fetches completed MLB scores and updates PENDING rows in batch to avoid 429 quota errors."""
+    """Fetches completed MLB scores and updates PENDING rows safely."""
     try:
         records = sheet.get_all_records()
         if not records:
@@ -70,10 +72,10 @@ def auto_grade_pending_bets(sheet, odds_key):
             if str(r.get("Status", "")).upper() != "PENDING":
                 continue
 
+            game_date = str(r.get("Date", "")).strip()
             game_title = str(r.get("Game", ""))
             pick = str(r.get("Pick", "")).strip()
             
-            # Safe float parsing
             try:
                 odds = float(r.get("Odds", -110))
             except (ValueError, TypeError):
@@ -84,15 +86,17 @@ def auto_grade_pending_bets(sheet, odds_key):
             except (ValueError, TypeError):
                 units = 1.0
 
-            # Match completed games
+            # Match against finished games on or after game_date
             for match in scores_data:
                 if not match.get("completed"):
                     continue
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                
-                if home_team in game_title or away_team in game_title:
+                commence_time = match.get("commence_time", "")[:10]  # Extracts YYYY-MM-DD
+
+                # Must match teams AND ensure game commence date is >= prediction date
+                if (home_team in game_title or away_team in game_title) and (commence_time >= game_date):
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
                         continue
@@ -109,14 +113,14 @@ def auto_grade_pending_bets(sheet, odds_key):
                     else:
                         profit = -100.0 * units
 
-                    print(f"Graded Row {row_idx}: {game_title} -> {status} (${round(profit, 2)})")
+                    print(f"Graded Row {row_idx}: {game_title} ({commence_time}) -> {status} (${round(profit, 2)})")
 
-                    # Stage updates for batch write (Column J: Status, Column K: P/L)
+                    # Stage update (Column K: Status, Column L: P/L ($))
                     updates.append({
-                        "range": f"J{row_idx}:K{row_idx}",
+                        "range": f"K{row_idx}:L{row_idx}",
                         "values": [[status, round(profit, 2)]]
                     })
-                    break  # Exit inner loop once matched to prevent duplicate updates
+                    break
 
         if updates:
             print(f"Batch updating {len(updates)} row(s) in Google Sheets...")
@@ -255,11 +259,15 @@ def main():
 
     picks = generate_picks(odds, updated_memory)
 
+    # Current Eastern Timestamp
+    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+
     print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets...")
 
     for p in picks:
         sheet.append_row([
-            p.get("date", ""),
+            p.get("date", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")),
+            current_time_str,  # Column B: Pulled Time
             p.get("game", ""),
             p.get("bet_type", ""),
             p.get("pick", ""),
