@@ -5,7 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from google import genai
 
-# --- 1. GOOGLE SHEETS AUTHENTICATION ---
+# --- 1. GOOGLE SHEETS AUTHENTICATION & HEADER FORMATTING ---
 def get_sheet():
     print("Connecting to Google Sheets...")
     scopes = [
@@ -23,6 +23,39 @@ def get_sheet():
     sheet = client.open("MLB AI Betting Tracker").sheet1
     print(f"Connected successfully to Google Sheet tab: '{sheet.title}'")
     return sheet
+
+def ensure_headers(sheet):
+    """Checks if headers exist; if not, inserts and formats them cleanly."""
+    existing_rows = sheet.get_all_values()
+    headers = [
+        "Date", "Game", "Bet Type", "Pick", "Odds", 
+        "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
+        "Status", "P/L ($)", "Reasoning"
+    ]
+
+    if len(existing_rows) == 0:
+        print("Sheet is empty. Writing headers and formatting top row...")
+        sheet.append_row(headers)
+        
+        try:
+            # Format header row to be bold
+            sheet.format("A1:L1", {
+                "textFormat": {"bold": True}
+            })
+            # Freeze row 1 so headers remain pinned when scrolling
+            sheet.freeze(rows=1)
+        except Exception as e:
+            print(f"Header formatting notice: {e}")
+            
+    elif existing_rows[0] != headers and existing_rows[0][0] != "Date":
+        # If row 1 is data instead of headers, insert headers at row 1
+        print("Inserting missing headers at the top row...")
+        sheet.insert_row(headers, index=1)
+        try:
+            sheet.format("A1:L1", {"textFormat": {"bold": True}})
+            sheet.freeze(rows=1)
+        except Exception as e:
+            print(f"Header formatting notice: {e}")
 
 # --- 2. FETCH MLB ODDS ---
 def fetch_mlb_odds():
@@ -82,16 +115,8 @@ def generate_picks(odds_data, memory):
 def main():
     sheet = get_sheet()
     
-    # Ensure headers exist
-    existing_rows = sheet.get_all_values()
-    if len(existing_rows) == 0:
-        print("Sheet is empty. Writing column headers...")
-        headers = [
-            "Date", "Game", "Bet Type", "Pick", "Odds", 
-            "Implied Prob", "Model Prob", "EV", "Units", 
-            "Status", "P/L", "Reasoning"
-        ]
-        sheet.append_row(headers)
+    # Ensures bold headers are at row 1
+    ensure_headers(sheet)
 
     memory = load_memory()
     odds = fetch_mlb_odds()
