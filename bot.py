@@ -56,7 +56,6 @@ def generate_picks(odds_data, memory):
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is missing!")
 
-    # Initialize modern Google GenAI Client
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -72,7 +71,7 @@ def generate_picks(odds_data, memory):
     """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt
     )
 
@@ -98,18 +97,18 @@ def main():
     odds = fetch_mlb_odds()
 
     if not odds:
-        print("WARNING: No odds were returned from The Odds API. Using fallback test row...")
+        print("WARNING: No live odds returned. Using fallback test row to verify Google Sheets...")
         picks = [{
             "date": "2026-08-14",
-            "game": "Test Game @ Demo Venue",
+            "game": "Test Game @ Demo Ballpark",
             "bet_type": "Moneyline",
             "pick": "Home Team",
             "odds": -110,
             "implied_prob": 52.38,
             "model_prob": 58.00,
-            "expected_value": 10.7,
+            "expected_value": 10.70,
             "units": 1.0,
-            "reasoning": "Test run verification"
+            "reasoning": "Pipeline test verification"
         }]
     else:
         picks = generate_picks(odds, memory)
