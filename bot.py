@@ -25,11 +25,11 @@ def get_sheet():
     return sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers with Pulled Time."""
+    """Ensures row 1 contains bold, frozen column headers including Sportsbook info."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
-            "Date", "Pulled Time", "Game", "Bet Type", "Pick", "Odds", 
+            "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
             "Status", "P/L ($)", "Reasoning"
         ]
@@ -95,7 +95,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                 away_team = match.get("away_team", "")
                 commence_time = match.get("commence_time", "")[:10]  # Extracts YYYY-MM-DD
 
-                # Must match teams AND ensure game commence date is >= prediction date
+                # Match teams and ensure game commence date is >= prediction date
                 if (home_team in game_title or away_team in game_title) and (commence_time >= game_date):
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
@@ -208,7 +208,7 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 5. GENERATE PICKS VIA GEMINI ---
+# --- 5. GENERATE PICKS VIA GEMINI (APPROVED SPORTSBOOKS ONLY) ---
 def generate_picks(odds_data, memory):
     print("Sending odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -223,11 +223,21 @@ def generate_picks(odds_data, memory):
     === TODAY'S LIVE ODDS DATA ===
     {json.dumps(odds_data[:8])}
 
+    STRICT SPORTSBOOK CONSTRAINTS:
+    - You may analyze and compare odds across ALL sportsbooks to detect market line movements.
+    - However, you MUST ONLY recommend bets where the pick and odds are placed on one of these 4 approved sportsbooks:
+      1. FanDuel
+      2. DraftKings
+      3. BetMGM
+      4. Caesars
+
     INSTRUCTIONS:
     1. Review your historical performance and strategy guidance in your memory above.
-    2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV picks.
+    2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV bets from the 4 allowed sportsbooks.
     3. Return strictly a JSON array of 5 objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
+       
+       Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
     """
 
     response = client.models.generate_content(
@@ -269,7 +279,7 @@ def main():
             p.get("date", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")),
             current_time_str,  # Column B: Pulled Time
             p.get("game", ""),
-            p.get("bet_type", ""),
+            p.get("bet_type", ""),  # Column D: Bet Type / Sportsbook
             p.get("pick", ""),
             p.get("odds", ""),
             p.get("implied_prob", ""),
