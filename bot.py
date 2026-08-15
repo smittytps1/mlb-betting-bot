@@ -54,6 +54,55 @@ def ensure_headers(sheet):
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
+def ensure_evolution_sheet(spreadsheet):
+    """Guarantees the 'Evolution & Learnings' tab exists with bold headers."""
+    try:
+        try:
+            evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
+        except Exception:
+            print("Creating 'Evolution & Learnings' worksheet tab...")
+            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=100, cols=10)
+
+        existing_rows = evo_sheet.get_all_values()
+        headers = [
+            "Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", 
+            "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
+        ]
+
+        if len(existing_rows) == 0 or existing_rows[0][0] != "Timestamp":
+            print("Writing headers to 'Evolution & Learnings' tab...")
+            evo_sheet.insert_row(headers, index=1)
+            evo_sheet.format("A1:H1", {"textFormat": {"bold": True}})
+            evo_sheet.freeze(rows=1)
+        return evo_sheet
+    except Exception as e:
+        print(f"Notice while ensuring Evolution sheet: {e}")
+        return None
+
+def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
+    """Logs a live snapshot of the bot's learning, factor weights, and strategy evolution."""
+    try:
+        evo_sheet = ensure_evolution_sheet(spreadsheet)
+        if not evo_sheet:
+            return
+
+        factors = memory.get("reasoning_factor_weights", {})
+        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
+
+        evo_sheet.append_row([
+            current_time_str,
+            sport_label,
+            memory.get("total_bets", 0),
+            memory.get("win_rate", "0%"),
+            memory.get("net_profit_dollars", 0.0),
+            weights_str if weights_str else "Standard (1.0x)",
+            memory.get("learnings_and_adjustments", "Maintain standard criteria."),
+            validations_summary if validations_summary else "No re-synthesis needed."
+        ])
+        print("Evolution & Learnings tab updated successfully!")
+    except Exception as e:
+        print(f"Notice while logging to Evolution tab: {e}")
+
 # --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
     """Grades PENDING bets strictly if the game's start time is AFTER the prediction's pulled time."""
@@ -165,7 +214,7 @@ def auto_grade_pending_bets(sheet, odds_key):
     except Exception as e:
         print(f"Auto-grading completed with notice: {e}")
 
-# --- 3. SCOREBOARD & EVOLUTION TAB UPDATERS ---
+# --- 3. SCOREBOARD UPDATER ---
 def update_scoreboard(spreadsheet):
     """Ensures the 'Scoreboard' tab exists and contains dynamic formulas for both bots."""
     try:
@@ -189,42 +238,6 @@ def update_scoreboard(spreadsheet):
         print("Scoreboard tab successfully updated with live formulas!")
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
-
-def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
-    """Logs a snapshot of the bot's learning, factor weights, and strategy evolution."""
-    try:
-        try:
-            evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
-        except Exception:
-            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=100, cols=10)
-
-        existing_rows = evo_sheet.get_all_values()
-        headers = [
-            "Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", 
-            "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
-        ]
-
-        if len(existing_rows) == 0 or existing_rows[0][0] != "Timestamp":
-            evo_sheet.insert_row(headers, index=1)
-            evo_sheet.format("A1:H1", {"textFormat": {"bold": True}})
-            evo_sheet.freeze(rows=1)
-
-        factors = memory.get("reasoning_factor_weights", {})
-        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
-
-        evo_sheet.append_row([
-            current_time_str,
-            sport_label,
-            memory.get("total_bets", 0),
-            memory.get("win_rate", "0%"),
-            memory.get("net_profit_dollars", 0.0),
-            weights_str if weights_str else "Standard (1.0x)",
-            memory.get("learnings_and_adjustments", "Maintain standard criteria."),
-            validations_summary if validations_summary else "No re-synthesis needed."
-        ])
-        print("Evolution & Learnings tab updated successfully!")
-    except Exception as e:
-        print(f"Notice while logging to Evolution tab: {e}")
 
 # --- 4. MEMORY MANAGEMENT & REASONING FACTOR WEIGHTING ---
 def load_memory():
@@ -526,6 +539,8 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
 def main():
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
+    ensure_evolution_sheet(spreadsheet)
+
     odds_key = os.environ.get("ODDS_API_KEY")
 
     if odds_key:
@@ -537,6 +552,9 @@ def main():
     updated_memory = update_memory_from_sheet(sheet, memory)
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+
+    # Initial Run Execution Snapshot
+    update_evolution_log(spreadsheet, "MLB", updated_memory, "Execution started. Evaluating odds & open picks.", current_time_str)
 
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
@@ -602,8 +620,8 @@ def main():
         ])
         appended_count += 1
 
-    # Log to Evolution & Learnings Tab
-    val_summary_str = " ; ".join(val_notes) if val_notes else f"Added {appended_count} new pick(s)."
+    # Post-Synthesis Snapshot Log
+    val_summary_str = " ; ".join(val_notes) if val_notes else f"Generated {appended_count} new pick(s)."
     update_evolution_log(spreadsheet, "MLB", updated_memory, val_summary_str, current_time_str)
 
     print(f"MLB Execution Complete: {appended_count} new/updated pick(s) added, {skipped_count} duplicate(s) skipped.")
