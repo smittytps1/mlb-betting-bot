@@ -1,12 +1,14 @@
 import os
 import json
 import re
+import time
 import requests
 import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
 from google import genai
+from google.genai import errors
 
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheets():
@@ -269,9 +271,9 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI WITH SEARCH GROUNDING & DEEP SYNTHESIS ---
+# --- 6. GENERATE PICKS VIA GEMINI CHAT SESSION WITH RETRY LOGIC ---
 def generate_picks(odds_data, memory):
-    print("Sending MLB odds data and performance memory to Gemini with Search Grounding...")
+    print("Sending MLB odds data and performance memory to Gemini Chat...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -292,37 +294,46 @@ def generate_picks(odds_data, memory):
       3. BetMGM
       4. Caesars
 
-    DEEP ANALYSIS & SEARCH GROUNDING INSTRUCTIONS:
-    1. SEARCH GROUNDING: Search Google for today's MLB news, weather forecasts (wind speed/direction, temperature, humidity), official starting lineups, starting pitcher matchups/stats, and key bullpen availability.
-    2. MULTI-FACTOR SYNTHESIS: Combine your live search findings with the provided sportsbook odds to calculate true, un-biased model probabilities.
-    3. STRATEGY & HEDGING: Hedging or picking opposing lines is permitted ONLY if odds movements, weather shifts, or injury news have generated a distinct positive expected value (+EV) opportunity since previous updates.
-    4. FORMATTING: Return ONLY a valid JSON array of 5 objects containing:
+    DEEP ANALYSIS INSTRUCTIONS:
+    1. MULTI-FACTOR SYNTHESIS: Evaluate starting pitcher matchups, lineups, bullpen status, and recent team trends alongside the provided sportsbook odds.
+    2. STRATEGY & HEDGING: Hedging or picking opposing lines is permitted ONLY if odds movements, weather shifts, or injury news have generated a distinct positive expected value (+EV) opportunity since previous updates.
+    3. FORMATTING: Return ONLY a valid JSON array of 5 objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
        Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
        Note for "game": ALWAYS format team match titles consistently as "Away Team @ Home Team".
-       Note for "reasoning": Cite key weather, pitcher matchup, or injury context retrieved during your search synthesis.
     """
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-        config={"tools": [{"google_search": {}}]}
-    )
+    # Retry loop with backoff for API rate limits
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Use chats.create to follow recommended SDK pattern for AFC/Multi-turn
+            chat = client.chats.create(model="gemini-3.6-flash")
+            response = chat.send_message(prompt)
+            
+            text = response.text.strip()
+            json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+            if json_match:
+                clean_json = json_match.group(0)
+            else:
+                clean_json = text.replace("```json", "").replace("```", "").strip()
 
-    text = response.text.strip()
-    json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
-    if json_match:
-        clean_json = json_match.group(0)
-    else:
-        clean_json = text.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_json)
 
-    try:
-        return json.loads(clean_json)
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse Gemini output into JSON: {e}")
-        print(f"Raw Output Received:\n{text}")
-        return []
+        except errors.ClientError as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                wait_time = (attempt + 1) * 10
+                print(f"Rate limit (429) hit. Retrying in {wait_time} seconds (Attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+            else:
+                print(f"Gemini API Error: {e}")
+                break
+        except Exception as e:
+            print(f"Unexpected error during pick generation: {e}")
+            break
+
+    return []
 
 # --- 7. TEAM-ORDER INVARIANT DEDUPLICATION HELPER ---
 def normalize_string(text):
