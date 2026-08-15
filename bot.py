@@ -30,25 +30,28 @@ def get_sheets():
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers in the MLB tab."""
+    """Ensures row 1 contains bold, frozen column headers including Validation."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
-            "Status", "P/L ($)", "Reasoning"
+            "Status", "P/L ($)", "Reasoning", "Validation"
         ]
 
         if len(existing_rows) == 0 or (len(existing_rows) > 0 and existing_rows[0][0] != "Date"):
             print("Writing MLB column headers to row 1...")
             sheet.insert_row(headers, index=1)
             try:
-                sheet.format("A1:M1", {"textFormat": {"bold": True}})
+                sheet.format("A1:N1", {"textFormat": {"bold": True}})
                 sheet.freeze(rows=1)
             except Exception as e:
                 print(f"Header formatting notice: {e}")
         else:
-            print("Headers already exist on the MLB tab.")
+            # Ensure Column N header is set
+            if len(existing_rows[0]) < 14 or existing_rows[0][13] != "Validation":
+                sheet.update_cell(1, 14, "Validation")
+                sheet.format("N1", {"textFormat": {"bold": True}})
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
@@ -258,7 +261,7 @@ def update_memory_from_sheet(sheet, memory):
 
     return memory
 
-# --- 5. FETCH MLB ODDS ---
+# --- 5. FETCH MLB ODDS & ACTIVE TODAY PICKS ---
 def fetch_mlb_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
@@ -271,9 +274,36 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI CHAT SESSION WITH RETRY LOGIC ---
-def generate_picks(odds_data, memory):
-    print("Sending MLB odds data and performance memory to Gemini Chat...")
+def get_today_existing_picks(sheet, today_date_str):
+    """Pulls existing open picks logged today for Gemini context and validation."""
+    rows = sheet.get_all_values()
+    if len(rows) <= 1:
+        return []
+
+    headers = [h.strip() for h in rows[0]]
+    existing = []
+
+    for row_idx, r in enumerate(rows[1:], start=2):
+        if len(r) >= 11:
+            r_date = str(r[0]).strip()
+            r_status = str(r[10]).strip().upper()
+            if r_date == today_date_str and r_status == "PENDING":
+                existing.append({
+                    "row_index": row_idx,
+                    "date": r[0],
+                    "pulled_time": r[1] if len(r) > 1 else "",
+                    "game": r[2] if len(r) > 2 else "",
+                    "bet_type": r[3] if len(r) > 3 else "",
+                    "pick": r[4] if len(r) > 4 else "",
+                    "odds": r[5] if len(r) > 5 else "",
+                    "reasoning": r[12] if len(r) > 12 else "",
+                    "validation": r[13] if len(r) > 13 else ""
+                })
+    return existing
+
+# --- 6. GENERATE PICKS VIA GEMINI WITH SYNTHESIS & VALIDATION ---
+def generate_picks_and_validations(odds_data, memory, open_picks):
+    print("Sending MLB odds data, active open picks, and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -283,37 +313,61 @@ def generate_picks(odds_data, memory):
     === YOUR HISTORICAL MEMORY & PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
 
+    === ACTIVE OPEN PICKS PREVIOUSLY LOGGED TODAY ===
+    {json.dumps(open_picks, indent=2)}
+
     === TODAY'S LIVE ODDS DATA ===
     {json.dumps(odds_data[:8])}
 
     STRICT SPORTSBOOK CONSTRAINTS:
-    - You may analyze and compare odds across ALL sportsbooks to detect market line movements.
-    - However, you MUST ONLY recommend bets where the pick and odds are placed on one of these 4 approved sportsbooks:
-      1. FanDuel
-      2. DraftKings
-      3. BetMGM
-      4. Caesars
+    - Recommend bets where the pick and odds are placed on one of these 4 approved sportsbooks:
+      1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars
 
-    DEEP ANALYSIS INSTRUCTIONS:
-    1. MULTI-FACTOR SYNTHESIS: Evaluate starting pitcher matchups, lineups, bullpen status, and recent team trends alongside the provided sportsbook odds.
-    2. STRATEGY & HEDGING: Hedging or picking opposing lines is permitted ONLY if odds movements, weather shifts, or injury news have generated a distinct positive expected value (+EV) opportunity since previous updates.
-    3. FORMATTING: Return ONLY a valid JSON array of 5 objects containing:
-       "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
-       
-       Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
-       Note for "game": ALWAYS format team match titles consistently as "Away Team @ Home Team".
+    SYNTHESIS & VALIDATION INSTRUCTIONS:
+    1. REVIEW PREVIOUS PICKS: Look at the active open picks previously logged today above.
+    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick (e.g. pitcher stats vs bullpen depth), combine the arguments for BOTH teams and determine which side holds superior true +EV value.
+    3. VALIDATE OR REJECT EXISTING PICKS:
+       - If an existing pick remains the best stance, output an object in "validations" with action "VALIDATED".
+       - If synthesized analysis shows the opposing side or a new bet is superior, mark the old pick in "validations" as action "REJECTED", and output the new superior bet in "new_picks".
+    4. NEW BETS: Select up to 5 total high-EV picks for games not yet covered.
+
+    FORMATTING REQUIREMENTS:
+    Return strictly a single JSON object with two arrays: "validations" and "new_picks".
+
+    JSON Structure:
+    {{
+      "validations": [
+        {{
+          "row_index": <int from open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "reason": "<brief justification for validation or rejection>"
+        }}
+      ],
+      "new_picks": [
+        {{
+          "date": "YYYY-MM-DD",
+          "game": "Away Team @ Home Team",
+          "bet_type": "Moneyline (FanDuel)",
+          "pick": "Team Name",
+          "odds": -110,
+          "implied_prob": "52.4%",
+          "model_prob": "58.0%",
+          "expected_value": "+10.7%",
+          "units": 1.0,
+          "reasoning": "<synthesized reasoning>"
+        }}
+      ]
+    }}
     """
 
-    # Retry loop with backoff for API rate limits
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Use chats.create to follow recommended SDK pattern for AFC/Multi-turn
             chat = client.chats.create(model="gemini-3.6-flash")
             response = chat.send_message(prompt)
             
             text = response.text.strip()
-            json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 clean_json = json_match.group(0)
             else:
@@ -333,21 +387,18 @@ def generate_picks(odds_data, memory):
             print(f"Unexpected error during pick generation: {e}")
             break
 
-    return []
+    return {"validations": [], "new_picks": []}
 
-# --- 7. TEAM-ORDER INVARIANT DEDUPLICATION HELPER ---
+# --- 7. DEDUPLICATION HELPER ---
 def normalize_string(text):
-    """Strips all non-alphanumeric characters and lowercases."""
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
 def extract_sorted_teams(game_str):
-    """Splits game title by @, vs, at, or v and returns a tuple of alphabetically sorted normalized team names."""
     parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
     cleaned = [normalize_string(p) for p in parts if p.strip()]
     return tuple(sorted(cleaned))
 
 def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-    """Checks for duplicate bets invariant to team order ('Away @ Home' vs 'Home vs Away')."""
     if len(raw_rows) <= 1:
         return False
 
@@ -405,6 +456,9 @@ def main():
 
     memory = load_memory()
     updated_memory = update_memory_from_sheet(sheet, memory)
+    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
     odds = fetch_mlb_odds(odds_key)
@@ -413,15 +467,28 @@ def main():
         print("WARNING: No live MLB odds returned. Skipping pick generation.")
         return
 
-    picks = generate_picks(odds, updated_memory)
-    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
-    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    open_picks = get_today_existing_picks(sheet, today_date_str)
+    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks)
 
+    validations = ai_response.get("validations", [])
+    new_picks = ai_response.get("new_picks", [])
+
+    # Process Validation / Rejection Column Updates
+    if validations:
+        print(f"Processing {len(validations)} pick validation update(s)...")
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            if row_idx and action in ["VALIDATED", "REJECTED"]:
+                sheet.update_cell(row_idx, 14, action)
+                print(f"Row {row_idx} marked as {action}.")
+
+    # Process New Picks
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
 
-    for p in picks:
+    for p in new_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
@@ -450,7 +517,8 @@ def main():
             p.get("units", 1.0),
             "PENDING",
             0.0,
-            p.get("reasoning", "")
+            p.get("reasoning", ""),
+            ""  # Column N: Validation left blank for newly added picks
         ])
         appended_count += 1
 
