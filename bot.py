@@ -49,9 +49,9 @@ def ensure_headers(sheet):
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
-# --- 2. BATCH AUTO-GRADING VIA SCORES API ---
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Fetches completed MLB scores and updates PENDING rows safely in batch."""
+    """Fetches completed MLB scores and grades pending rows only if game started after prediction was pulled."""
     try:
         records = sheet.get_all_records()
         if not records:
@@ -76,9 +76,9 @@ def auto_grade_pending_bets(sheet, odds_key):
             if str(r.get("Status", "")).upper() != "PENDING":
                 continue
 
-            game_date = str(r.get("Date", "")).strip()
             game_title = str(r.get("Game", ""))
             pick = str(r.get("Pick", "")).strip()
+            pulled_time_str = str(r.get("Pulled Time", "")).strip()
             
             try:
                 odds = float(r.get("Odds", -110))
@@ -96,9 +96,17 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                commence_time = match.get("commence_time", "")[:10]
+                commence_time_raw = match.get("commence_time", "")  # e.g., "2026-08-15T18:10:00Z"
 
-                if (home_team in game_title or away_team in game_title) and (commence_time >= game_date):
+                # Check if game teams match
+                if home_team in game_title or away_team in game_title:
+                    # Validate that the completed game started AFTER or ON the day prediction was made
+                    game_commence_date = commence_time_raw[:10]
+                    pulled_date = pulled_time_str[:10] if len(pulled_time_str) >= 10 else str(r.get("Date", "")).strip()
+
+                    if game_commence_date < pulled_date:
+                        continue  # Skip old historical games between same teams
+
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
                         continue
@@ -115,7 +123,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                     else:
                         profit = -100.0 * units
 
-                    print(f"Graded Row {row_idx}: {game_title} ({commence_time}) -> {status} (${round(profit, 2)})")
+                    print(f"Graded Row {row_idx}: {game_title} ({game_commence_date}) -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
@@ -305,15 +313,16 @@ def main():
 
     for p in picks:
         pick_date = p.get("date", today_date_str)
-        game = p.get("game", "")
-        bet_type = p.get("bet_type", "")
-        pick = p.get("pick", "")
+        game = str(p.get("game", "")).strip()
+        bet_type = str(p.get("bet_type", "")).strip()
+        pick = str(p.get("pick", "")).strip()
         
         try:
             odds_val = float(p.get("odds", -110))
         except (ValueError, TypeError):
             odds_val = -110.0
 
+        # Strict Deduplication Check: Same Game + Bet Type + Pick + Odds
         is_duplicate = False
         for r in existing_records:
             r_date = str(r.get("Date", "")).strip()
@@ -331,7 +340,7 @@ def main():
                 break
 
         if is_duplicate:
-            print(f"Skipping duplicate pick: {game} | {pick} @ {odds_val}")
+            print(f"Skipping duplicate prediction: {game} | {pick} @ {odds_val}")
             skipped_count += 1
             continue
 
