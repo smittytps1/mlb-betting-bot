@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 import gspread
 from datetime import datetime
@@ -51,13 +52,30 @@ def ensure_headers(sheet):
 
 # --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Fetches completed MLB scores and grades pending rows safely in batch."""
+    """Grades PENDING bets strictly if the game's start time is AFTER the prediction's pulled time."""
     try:
-        records = sheet.get_all_records()
-        if not records:
+        rows = sheet.get_all_values()
+        if len(rows) <= 1:
             return
 
-        pending_rows = [i for i, r in enumerate(records) if str(r.get("Status", "")).upper() == "PENDING"]
+        headers = [h.strip() for h in rows[0]]
+        
+        try:
+            status_idx = headers.index("Status")
+            game_idx = headers.index("Game")
+            pick_idx = headers.index("Pick")
+            pulled_idx = headers.index("Pulled Time")
+            odds_idx = headers.index("Odds")
+            units_idx = headers.index("Units")
+        except ValueError as e:
+            print(f"Auto-grading skipped: Missing required header column - {e}")
+            return
+
+        pending_rows = []
+        for row_idx, r in enumerate(rows[1:], start=2):
+            if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING":
+                pending_rows.append((row_idx, r))
+
         if not pending_rows:
             print("No pending MLB bets to grade.")
             return
@@ -72,23 +90,29 @@ def auto_grade_pending_bets(sheet, odds_key):
         scores_data = resp.json()
         updates = []
 
-        for row_idx, r in enumerate(records, start=2):
-            if str(r.get("Status", "")).upper() != "PENDING":
-                continue
-
-            game_title = str(r.get("Game", ""))
-            pick = str(r.get("Pick", "")).strip()
-            pulled_time_str = str(r.get("Pulled Time", "")).strip()
+        for row_idx, r in pending_rows:
+            game_title = str(r[game_idx]).strip()
+            pick = str(r[pick_idx]).strip()
+            pulled_time_raw = str(r[pulled_idx]).strip()
             
             try:
-                odds = float(r.get("Odds", -110))
+                odds = float(r[odds_idx])
             except (ValueError, TypeError):
                 odds = -110.0
 
             try:
-                units = float(r.get("Units", 1.0))
+                units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
             except (ValueError, TypeError):
                 units = 1.0
+
+            # Parse Pulled Time into datetime object for exact comparison
+            pulled_dt = None
+            try:
+                # Format e.g., "2026-08-15 10:12:52 EDT"
+                clean_time = pulled_time_raw.replace(" EDT", "").replace(" EST", "").strip()
+                pulled_dt = datetime.strptime(clean_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("America/New_York"))
+            except Exception:
+                pass
 
             for match in scores_data:
                 if not match.get("completed"):
@@ -96,14 +120,17 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                commence_time_raw = match.get("commence_time", "")
+                commence_time_str = match.get("commence_time", "") # ISO format e.g. "2026-08-15T18:10:00Z"
 
                 if home_team in game_title or away_team in game_title:
-                    game_commence_date = commence_time_raw[:10]
-                    pulled_date = pulled_time_str[:10] if len(pulled_time_str) >= 10 else str(r.get("Date", "")).strip()
-
-                    if game_commence_date < pulled_date:
-                        continue
+                    # Enforce that game start time MUST be after Pulled Time
+                    if commence_time_str and pulled_dt:
+                        try:
+                            game_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
+                            if game_dt <= pulled_dt:
+                                continue  # Game started before or at prediction time; skip old games
+                        except Exception:
+                            pass
 
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
@@ -121,7 +148,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                     else:
                         profit = -100.0 * units
 
-                    print(f"Graded Row {row_idx}: {game_title} ({game_commence_date}) -> {status} (${round(profit, 2)})")
+                    print(f"Graded Row {row_idx}: {game_title} -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
@@ -185,23 +212,28 @@ def load_memory():
 
 def update_memory_from_sheet(sheet, memory):
     try:
-        records = sheet.get_all_records()
-        if not records:
+        rows = sheet.get_all_values()
+        if len(rows) <= 1:
             return memory
 
-        wins = sum(1 for r in records if str(r.get("Status", "")).upper() == "WIN")
-        losses = sum(1 for r in records if str(r.get("Status", "")).upper() == "LOSS")
+        headers = [h.strip() for h in rows[0]]
+        status_idx = headers.index("Status") if "Status" in headers else 10
+        pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
+
+        wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
+        losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
         total = wins + losses
 
         if total > 0:
             win_rate = round((wins / total) * 100, 1)
             
             net_pl = 0.0
-            for r in records:
-                try:
-                    net_pl += float(r.get("P/L ($)", 0.0) or 0.0)
-                except (ValueError, TypeError):
-                    pass
+            for r in rows[1:]:
+                if len(r) > pl_idx:
+                    try:
+                        net_pl += float(r[pl_idx] or 0.0)
+                    except (ValueError, TypeError):
+                        pass
 
             memory["total_bets"] = total
             memory["wins"] = wins
@@ -280,22 +312,48 @@ def generate_picks(odds_data, memory):
     clean_json = response.text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_json)
 
-# --- 7. HELPER FOR DEDUPLICATION ---
-def is_duplicate_pick(existing_records, pick_date, game, bet_type, pick, odds_val):
-    """Normalized comparison across Game, Bet Type, Pick, and Odds regardless of probability changes."""
-    norm_game = str(game).strip().lower()
-    norm_bet_type = str(bet_type).strip().lower()
-    norm_pick = str(pick).strip().lower()
-    norm_odds = int(round(float(odds_val)))
+# --- 7. ULTRA-ROBUST DEDUPLICATION HELPER ---
+def normalize_text(text):
+    """Strips all punctuation, separators (at, @, vs), and casing for bulletproof text matching."""
+    text = str(text).lower()
+    text = re.sub(r'\b(at|vs|@)\b', ' ', text)
+    text = re.sub(r'[^a-z0-9]', '', text)
+    return text.strip()
 
-    for r in existing_records:
-        r_date = str(r.get("Date", "")).strip()
-        r_game = str(r.get("Game", "")).strip().lower()
-        r_bet_type = str(r.get("Bet Type / Sportsbook", "")).strip().lower()
-        r_pick = str(r.get("Pick", "")).strip().lower()
+def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
+    """Compares new predictions against raw sheet rows using normalized matching on Date, Game, Pick, and Odds."""
+    if len(raw_rows) <= 1:
+        return False
+
+    headers = [h.strip() for h in raw_rows[0]]
+    try:
+        date_col = headers.index("Date")
+        game_col = headers.index("Game")
+        bet_type_col = headers.index("Bet Type / Sportsbook")
+        pick_col = headers.index("Pick")
+        odds_col = headers.index("Odds")
+    except ValueError:
+        return False
+
+    norm_game = normalize_text(game)
+    norm_bet_type = normalize_text(bet_type)
+    norm_pick = normalize_text(pick)
+    try:
+        norm_odds = int(round(float(odds_val)))
+    except (ValueError, TypeError):
+        norm_odds = 0
+
+    for r in raw_rows[1:]:
+        if len(r) <= max(date_col, game_col, bet_type_col, pick_col, odds_col):
+            continue
+
+        r_date = str(r[date_col]).strip()
+        r_game = normalize_text(r[game_col])
+        r_bet_type = normalize_text(r[bet_type_col])
+        r_pick = normalize_text(r[pick_col])
         
         try:
-            r_odds = int(round(float(r.get("Odds", 0))))
+            r_odds = int(round(float(r[odds_col])))
         except (ValueError, TypeError):
             r_odds = 0
 
@@ -333,7 +391,7 @@ def main():
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
-    existing_records = sheet.get_all_records()
+    raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
 
@@ -348,7 +406,7 @@ def main():
         except (ValueError, TypeError):
             odds_val = -110.0
 
-        if is_duplicate_pick(existing_records, pick_date, game, bet_type, pick, odds_val):
+        if is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
             print(f"Skipping duplicate prediction: {game} | {pick} @ {int(round(odds_val))}")
             skipped_count += 1
             continue
