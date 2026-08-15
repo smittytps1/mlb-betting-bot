@@ -2,8 +2,8 @@ name: WNBA AI Betting Pipeline
 
 on:
   schedule:
-    - cron: '30 15 * * *' # Runs daily at 11:30 AM EDT (15:30 UTC)
-  workflow_dispatch:      # Enables manual trigger button
+    - cron: '30 15 * * *' # Daily at 11:30 AM EDT
+  workflow_dispatch:     # Enables manual trigger button
 
 jobs:
   run-pipeline:
