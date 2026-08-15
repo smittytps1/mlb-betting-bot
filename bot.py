@@ -105,10 +105,8 @@ def auto_grade_pending_bets(sheet, odds_key):
             except (ValueError, TypeError):
                 units = 1.0
 
-            # Parse Pulled Time into datetime object for exact comparison
             pulled_dt = None
             try:
-                # Format e.g., "2026-08-15 10:12:52 EDT"
                 clean_time = pulled_time_raw.replace(" EDT", "").replace(" EST", "").strip()
                 pulled_dt = datetime.strptime(clean_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("America/New_York"))
             except Exception:
@@ -120,15 +118,14 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                commence_time_str = match.get("commence_time", "") # ISO format e.g. "2026-08-15T18:10:00Z"
+                commence_time_str = match.get("commence_time", "")
 
                 if home_team in game_title or away_team in game_title:
-                    # Enforce that game start time MUST be after Pulled Time
                     if commence_time_str and pulled_dt:
                         try:
                             game_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
                             if game_dt <= pulled_dt:
-                                continue  # Game started before or at prediction time; skip old games
+                                continue
                         except Exception:
                             pass
 
@@ -272,7 +269,7 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI ---
+# --- 6. GENERATE PICKS VIA GEMINI (WITH REGEX JSON CLEANING) ---
 def generate_picks(odds_data, memory):
     print("Sending MLB odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -298,7 +295,7 @@ def generate_picks(odds_data, memory):
     INSTRUCTIONS:
     1. Review your historical performance and strategy guidance in your memory above.
     2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV bets.
-    3. Return strictly a JSON array of 5 objects containing:
+    3. Return ONLY a valid JSON array of 5 objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
        Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
@@ -309,19 +306,28 @@ def generate_picks(odds_data, memory):
         contents=prompt
     )
 
-    clean_json = response.text.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean_json)
+    text = response.text.strip()
+    json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+    if json_match:
+        clean_json = json_match.group(0)
+    else:
+        clean_json = text.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(clean_json)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse Gemini output into JSON: {e}")
+        print(f"Raw Output Received:\n{text}")
+        return []
 
 # --- 7. ULTRA-ROBUST DEDUPLICATION HELPER ---
 def normalize_text(text):
-    """Strips all punctuation, separators (at, @, vs), and casing for bulletproof text matching."""
     text = str(text).lower()
     text = re.sub(r'\b(at|vs|@)\b', ' ', text)
     text = re.sub(r'[^a-z0-9]', '', text)
     return text.strip()
 
 def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-    """Compares new predictions against raw sheet rows using normalized matching on Date, Game, Pick, and Odds."""
     if len(raw_rows) <= 1:
         return False
 
