@@ -48,7 +48,6 @@ def ensure_headers(sheet):
             except Exception as e:
                 print(f"Header formatting notice: {e}")
         else:
-            # Ensure Column N header is set
             if len(existing_rows[0]) < 14 or existing_rows[0][13] != "Validation":
                 sheet.update_cell(1, 14, "Validation")
                 sheet.format("N1", {"textFormat": {"bold": True}})
@@ -191,7 +190,7 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-# --- 4. MEMORY MANAGEMENT & ANALYTICS ---
+# --- 4. MEMORY MANAGEMENT & REASONING FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -206,11 +205,49 @@ def load_memory():
         "losses": 0,
         "win_rate": "0%",
         "net_profit_dollars": 0.0,
-        "learnings_and_adjustments": "No historical data evaluated yet. Maintain balanced evaluation."
+        "learnings_and_adjustments": "Maintain balanced quantitative evaluation.",
+        "reasoning_factor_weights": {
+            "bullpen_and_rest": {
+                "wins": 0,
+                "losses": 0,
+                "weight": 1.0,
+                "instruction": "Standard weighting on bullpen fatigue and leverage usage."
+            },
+            "contact_vs_strikeout": {
+                "wins": 0,
+                "losses": 0,
+                "weight": 1.0,
+                "instruction": "Standard weighting on contact-rate matchups vs high-strikeout pitchers."
+            },
+            "pitcher_underlying_metrics": {
+                "wins": 0,
+                "losses": 0,
+                "weight": 1.0,
+                "instruction": "Standard weighting on WHIP, K/BB ratios, and xFIP."
+            },
+            "weather_and_wind": {
+                "wins": 0,
+                "losses": 0,
+                "weight": 1.0,
+                "instruction": "Standard weighting on stadium weather and wind conditions."
+            }
+        }
     }
     with open("bot_memory.json", "w") as f:
         json.dump(default_memory, f, indent=2)
     return default_memory
+
+def calculate_factor_weight(wins, losses):
+    total = wins + losses
+    if total < 3:
+        return 1.0, "Baseline sample size. Maintain standard weighting."
+    win_rate = wins / total
+    if win_rate >= 0.65:
+        return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor heavily when establishing edge."
+    elif win_rate <= 0.40:
+        return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize as a primary driver; use only as secondary support."
+    else:
+        return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%). Maintain standard weighting."
 
 def update_memory_from_sheet(sheet, memory):
     try:
@@ -221,21 +258,50 @@ def update_memory_from_sheet(sheet, memory):
         headers = [h.strip() for h in rows[0]]
         status_idx = headers.index("Status") if "Status" in headers else 10
         pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
+        reason_idx = headers.index("Reasoning") if "Reasoning" in headers else 12
 
         wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
         losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
         total = wins + losses
 
+        # Track reasoning factor outcomes across settled bets
+        factors = memory.get("reasoning_factor_weights", {})
+        for key in factors:
+            factors[key]["wins"] = 0
+            factors[key]["losses"] = 0
+
+        keywords_map = {
+            "bullpen_and_rest": ["bullpen", "rest", "leverage", "fatigue", "reliever"],
+            "contact_vs_strikeout": ["contact", "strikeout", "swing-and-miss", "k-rate", "whiff"],
+            "pitcher_underlying_metrics": ["whip", "k/bb", "era", "fip", "underlying", "starter"],
+            "weather_and_wind": ["wind", "weather", "humidity", "temperature", "park factor"]
+        }
+
+        for r in rows[1:]:
+            if len(r) > max(status_idx, reason_idx):
+                status = str(r[status_idx]).strip().upper()
+                reasoning = str(r[reason_idx]).lower()
+                if status in ["WIN", "LOSS"]:
+                    for factor_key, kws in keywords_map.items():
+                        if any(kw in reasoning for kw in kws):
+                            if factor_key not in factors:
+                                factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
+                            if status == "WIN":
+                                factors[factor_key]["wins"] += 1
+                            else:
+                                factors[factor_key]["losses"] += 1
+
+        # Re-calculate dynamic weights
+        for factor_key, data in factors.items():
+            w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
+            data["weight"] = w_val
+            data["instruction"] = inst
+
+        memory["reasoning_factor_weights"] = factors
+
         if total > 0:
             win_rate = round((wins / total) * 100, 1)
-            
-            net_pl = 0.0
-            for r in rows[1:]:
-                if len(r) > pl_idx:
-                    try:
-                        net_pl += float(r[pl_idx] or 0.0)
-                    except (ValueError, TypeError):
-                        pass
+            net_pl = sum(float(r[pl_idx] or 0.0) for r in rows[1:] if len(r) > pl_idx and r[pl_idx])
 
             memory["total_bets"] = total
             memory["wins"] = wins
@@ -244,14 +310,9 @@ def update_memory_from_sheet(sheet, memory):
             memory["net_profit_dollars"] = round(net_pl, 2)
 
             if win_rate < 50.0:
-                memory["learnings_and_adjustments"] = (
-                    f"Current win rate is {win_rate}% (under 50%). Increase EV threshold, "
-                    "prioritize high-value moneyline picks, and avoid low-edge totals."
-                )
+                memory["learnings_and_adjustments"] = f"Win rate is {win_rate}% (<50%). Increase EV threshold and de-emphasize low-weight factors."
             else:
-                memory["learnings_and_adjustments"] = (
-                    f"Current win rate is {win_rate}% (profitable). Maintain current quantitative selection criteria."
-                )
+                memory["learnings_and_adjustments"] = f"Win rate is {win_rate}% (profitable). Maintain current quantitative selection criteria."
 
         with open("bot_memory.json", "w") as f:
             json.dump(memory, f, indent=2)
@@ -275,14 +336,11 @@ def fetch_mlb_odds(odds_key):
         return []
 
 def get_today_existing_picks(sheet, today_date_str):
-    """Pulls existing open picks logged today for Gemini context and validation."""
     rows = sheet.get_all_values()
     if len(rows) <= 1:
         return []
 
-    headers = [h.strip() for h in rows[0]]
     existing = []
-
     for row_idx, r in enumerate(rows[1:], start=2):
         if len(r) >= 11:
             r_date = str(r[0]).strip()
@@ -301,9 +359,9 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI WITH SYNTHESIS & VALIDATION ---
+# --- 6. GENERATE PICKS VIA GEMINI WITH WEIGHTED REASONING SYNTHESIS ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
-    print("Sending MLB odds data, active open picks, and performance memory to Gemini...")
+    print("Sending MLB odds data, factor weights, active picks, and memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -312,6 +370,13 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     === YOUR HISTORICAL MEMORY & PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
+
+    === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM PAST RESULTS) ===
+    {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
+
+    FACTOR WEIGHTING INSTRUCTIONS:
+    - HIGH WEIGHT FACTORS (Weight > 1.2): Prioritize these analytical factors when calculating model probability, as they have consistently correlated with winning predictions.
+    - LOW WEIGHT FACTORS (Weight < 0.8): Do NOT discard these factors completely, but DE-EMPHASIZE their influence. They MUST NOT be the primary driver or sole justification for a pick, but can be used as secondary supporting context alongside stronger factors.
 
     === ACTIVE OPEN PICKS PREVIOUSLY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -325,7 +390,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     SYNTHESIS & VALIDATION INSTRUCTIONS:
     1. REVIEW PREVIOUS PICKS: Look at the active open picks previously logged today above.
-    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick (e.g. pitcher stats vs bullpen depth), combine the arguments for BOTH teams and determine which side holds superior true +EV value.
+    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick, combine the arguments for BOTH teams (applying factor weights) and determine which side holds superior true +EV value.
     3. VALIDATE OR REJECT EXISTING PICKS:
        - If an existing pick remains the best stance, output an object in "validations" with action "VALIDATED".
        - If synthesized analysis shows the opposing side or a new bet is superior, mark the old pick in "validations" as action "REJECTED", and output the new superior bet in "new_picks".
@@ -354,7 +419,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
           "model_prob": "58.0%",
           "expected_value": "+10.7%",
           "units": 1.0,
-          "reasoning": "<synthesized reasoning>"
+          "reasoning": "<synthesized reasoning citing weighted factors>"
         }}
       ]
     }}
@@ -473,7 +538,6 @@ def main():
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
 
-    # Process Validation / Rejection Column Updates
     if validations:
         print(f"Processing {len(validations)} pick validation update(s)...")
         for val in validations:
@@ -483,7 +547,6 @@ def main():
                 sheet.update_cell(row_idx, 14, action)
                 print(f"Row {row_idx} marked as {action}.")
 
-    # Process New Picks
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
@@ -518,7 +581,7 @@ def main():
             "PENDING",
             0.0,
             p.get("reasoning", ""),
-            ""  # Column N: Validation left blank for newly added picks
+            ""
         ])
         appended_count += 1
 
