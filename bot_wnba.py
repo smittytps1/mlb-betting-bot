@@ -269,7 +269,7 @@ def fetch_wnba_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI ---
+# --- 6. GENERATE PICKS VIA GEMINI (WITH REGEX JSON CLEANING) ---
 def generate_picks(odds_data, memory):
     print("Sending WNBA odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -295,7 +295,7 @@ def generate_picks(odds_data, memory):
     INSTRUCTIONS:
     1. Review your historical performance and strategy guidance in your memory above.
     2. Analyze today's WNBA slate, calculate implied probabilities vs model probabilities, and select up to 5 high-EV bets.
-    3. Return strictly a JSON array of objects containing:
+    3. Return ONLY a valid JSON array of objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
        Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
@@ -306,19 +306,28 @@ def generate_picks(odds_data, memory):
         contents=prompt
     )
 
-    clean_json = response.text.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean_json)
+    text = response.text.strip()
+    json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+    if json_match:
+        clean_json = json_match.group(0)
+    else:
+        clean_json = text.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(clean_json)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse Gemini output into JSON: {e}")
+        print(f"Raw Output Received:\n{text}")
+        return []
 
 # --- 7. ULTRA-ROBUST DEDUPLICATION HELPER ---
 def normalize_text(text):
-    """Strips all punctuation, separators (at, @, vs), and casing for bulletproof text matching."""
     text = str(text).lower()
     text = re.sub(r'\b(at|vs|@)\b', ' ', text)
     text = re.sub(r'[^a-z0-9]', '', text)
     return text.strip()
 
 def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-    """Compares new predictions against raw sheet rows using normalized matching on Date, Game, Pick, and Odds."""
     if len(raw_rows) <= 1:
         return False
 
