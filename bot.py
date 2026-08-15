@@ -269,14 +269,14 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI ---
+# --- 6. GENERATE PICKS VIA GEMINI WITH SEARCH GROUNDING & DEEP SYNTHESIS ---
 def generate_picks(odds_data, memory):
-    print("Sending MLB odds data and performance memory to Gemini...")
+    print("Sending MLB odds data and performance memory to Gemini with Search Grounding...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an adaptive quantitative MLB betting expert that learns from past performance.
+    You are an adaptive quantitative MLB betting expert that performs deep multi-factor synthesis.
 
     === YOUR HISTORICAL MEMORY & PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
@@ -292,19 +292,22 @@ def generate_picks(odds_data, memory):
       3. BetMGM
       4. Caesars
 
-    INSTRUCTIONS:
-    1. Review your historical performance and strategy guidance in your memory above.
-    2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV bets.
-    3. Return ONLY a valid JSON array of 5 objects containing:
+    DEEP ANALYSIS & SEARCH GROUNDING INSTRUCTIONS:
+    1. SEARCH GROUNDING: Search Google for today's MLB news, weather forecasts (wind speed/direction, temperature, humidity), official starting lineups, starting pitcher matchups/stats, and key bullpen availability.
+    2. MULTI-FACTOR SYNTHESIS: Combine your live search findings with the provided sportsbook odds to calculate true, un-biased model probabilities.
+    3. STRATEGY & HEDGING: Hedging or picking opposing lines is permitted ONLY if odds movements, weather shifts, or injury news have generated a distinct positive expected value (+EV) opportunity since previous updates.
+    4. FORMATTING: Return ONLY a valid JSON array of 5 objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
        Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
        Note for "game": ALWAYS format team match titles consistently as "Away Team @ Home Team".
+       Note for "reasoning": Cite key weather, pitcher matchup, or injury context retrieved during your search synthesis.
     """
 
     response = client.models.generate_content(
         model="gemini-3.6-flash",
-        contents=prompt
+        contents=prompt,
+        config={"tools": [{"google_search": {}}]}
     )
 
     text = response.text.strip()
