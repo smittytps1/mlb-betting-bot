@@ -269,7 +269,7 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 6. GENERATE PICKS VIA GEMINI (WITH REGEX JSON CLEANING) ---
+# --- 6. GENERATE PICKS VIA GEMINI ---
 def generate_picks(odds_data, memory):
     print("Sending MLB odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -299,6 +299,7 @@ def generate_picks(odds_data, memory):
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
        Note for "bet_type": Format as "Moneyline (FanDuel)", "Spread (DraftKings)", "Total Over (BetMGM)", or "Moneyline (Caesars)".
+       Note for "game": ALWAYS format team match titles consistently as "Away Team @ Home Team".
     """
 
     response = client.models.generate_content(
@@ -320,14 +321,19 @@ def generate_picks(odds_data, memory):
         print(f"Raw Output Received:\n{text}")
         return []
 
-# --- 7. ULTRA-ROBUST DEDUPLICATION HELPER ---
-def normalize_text(text):
-    text = str(text).lower()
-    text = re.sub(r'\b(at|vs|@)\b', ' ', text)
-    text = re.sub(r'[^a-z0-9]', '', text)
-    return text.strip()
+# --- 7. TEAM-ORDER INVARIANT DEDUPLICATION HELPER ---
+def normalize_string(text):
+    """Strips all non-alphanumeric characters and lowercases."""
+    return re.sub(r'[^a-z0-9]', '', str(text).lower())
+
+def extract_sorted_teams(game_str):
+    """Splits game title by @, vs, at, or v and returns a tuple of alphabetically sorted normalized team names."""
+    parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
+    cleaned = [normalize_string(p) for p in parts if p.strip()]
+    return tuple(sorted(cleaned))
 
 def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
+    """Checks for duplicate bets invariant to team order ('Away @ Home' vs 'Home vs Away')."""
     if len(raw_rows) <= 1:
         return False
 
@@ -341,9 +347,9 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
     except ValueError:
         return False
 
-    norm_game = normalize_text(game)
-    norm_bet_type = normalize_text(bet_type)
-    norm_pick = normalize_text(pick)
+    norm_teams = extract_sorted_teams(game)
+    norm_bet_type = normalize_string(bet_type)
+    norm_pick = normalize_string(pick)
     try:
         norm_odds = int(round(float(odds_val)))
     except (ValueError, TypeError):
@@ -354,9 +360,9 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
             continue
 
         r_date = str(r[date_col]).strip()
-        r_game = normalize_text(r[game_col])
-        r_bet_type = normalize_text(r[bet_type_col])
-        r_pick = normalize_text(r[pick_col])
+        r_teams = extract_sorted_teams(r[game_col])
+        r_bet_type = normalize_string(r[bet_type_col])
+        r_pick = normalize_string(r[pick_col])
         
         try:
             r_odds = int(round(float(r[odds_col])))
@@ -364,7 +370,7 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
             r_odds = 0
 
         if (r_date == pick_date and 
-            r_game == norm_game and 
+            r_teams == norm_teams and 
             r_bet_type == norm_bet_type and 
             r_pick == norm_pick and 
             r_odds == norm_odds):
