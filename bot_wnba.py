@@ -165,7 +165,7 @@ def auto_grade_pending_bets(sheet, odds_key):
     except Exception as e:
         print(f"Auto-grading completed with notice: {e}")
 
-# --- 3. SCOREBOARD UPDATER ---
+# --- 3. SCOREBOARD & EVOLUTION TAB UPDATERS ---
 def update_scoreboard(spreadsheet):
     """Ensures the 'Scoreboard' tab exists and contains dynamic formulas for both bots."""
     try:
@@ -190,7 +190,43 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-# --- 4. MEMORY MANAGEMENT & REASONING FACTOR WEIGHTING ---
+def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
+    """Logs a snapshot of the bot's learning, factor weights, and strategy evolution."""
+    try:
+        try:
+            evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
+        except Exception:
+            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=100, cols=10)
+
+        existing_rows = evo_sheet.get_all_values()
+        headers = [
+            "Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", 
+            "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
+        ]
+
+        if len(existing_rows) == 0 or existing_rows[0][0] != "Timestamp":
+            evo_sheet.insert_row(headers, index=1)
+            evo_sheet.format("A1:H1", {"textFormat": {"bold": True}})
+            evo_sheet.freeze(rows=1)
+
+        factors = memory.get("reasoning_factor_weights", {})
+        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
+
+        evo_sheet.append_row([
+            current_time_str,
+            sport_label,
+            memory.get("total_bets", 0),
+            memory.get("win_rate", "0%"),
+            memory.get("net_profit_dollars", 0.0),
+            weights_str if weights_str else "Standard (1.0x)",
+            memory.get("learnings_and_adjustments", "Maintain standard criteria."),
+            validations_summary if validations_summary else "No re-synthesis needed."
+        ])
+        print("Evolution & Learnings tab updated successfully!")
+    except Exception as e:
+        print(f"Notice while logging to Evolution tab: {e}")
+
+# --- 4. MEMORY MANAGEMENT & WNBA REASONING FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("wnba_bot_memory.json"):
         try:
@@ -211,19 +247,25 @@ def load_memory():
                 "wins": 0,
                 "losses": 0,
                 "weight": 1.0,
-                "instruction": "Standard weighting on rest days and travel schedule advantages."
+                "instruction": "Standard weighting on rest days, travel, and back-to-back schedule advantages."
             },
             "roster_rotation_depth": {
                 "wins": 0,
                 "losses": 0,
                 "weight": 1.0,
-                "instruction": "Standard weighting on bench rotation and key player availability."
+                "instruction": "Standard weighting on bench rotation, injuries, and key player availability."
             },
             "pace_and_efficiency": {
                 "wins": 0,
                 "losses": 0,
                 "weight": 1.0,
-                "instruction": "Standard weighting on offensive/defensive ratings and game tempo."
+                "instruction": "Standard weighting on offensive/defensive ratings, turnovers, and game tempo."
+            },
+            "rebounding_and_paint_dominance": {
+                "wins": 0,
+                "losses": 0,
+                "weight": 1.0,
+                "instruction": "Standard weighting on interior scoring, second-chance points, and rebound differential."
             }
         }
     }
@@ -266,7 +308,8 @@ def update_memory_from_sheet(sheet, memory):
         keywords_map = {
             "rest_and_schedule": ["rest", "schedule", "travel", "back-to-back", "fatigue"],
             "roster_rotation_depth": ["bench", "rotation", "depth", "starters", "injury", "out"],
-            "pace_and_efficiency": ["pace", "tempo", "rating", "efficiency", "possession", "turnover"]
+            "pace_and_efficiency": ["pace", "tempo", "rating", "efficiency", "possession", "turnover"],
+            "rebounding_and_paint_dominance": ["rebound", "paint", "interior", "second-chance", "board"]
         }
 
         for r in rows[1:]:
@@ -366,8 +409,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
     FACTOR WEIGHTING INSTRUCTIONS:
-    - HIGH WEIGHT FACTORS (Weight > 1.2): Prioritize these analytical factors when calculating model probability, as they have consistently correlated with winning predictions.
-    - LOW WEIGHT FACTORS (Weight < 0.8): Do NOT discard these factors completely, but DE-EMPHASIZE their influence. They MUST NOT be the primary driver or sole justification for a pick, but can be used as secondary supporting context alongside stronger factors.
+    - HIGH WEIGHT FACTORS (Weight > 1.2): Prioritize these analytical factors when calculating model probability.
+    - LOW WEIGHT FACTORS (Weight < 0.8): DE-EMPHASIZE their influence. They MUST NOT be the primary driver or sole justification for a pick, but can be used as secondary supporting context.
 
     === ACTIVE OPEN PICKS PREVIOUSLY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -529,13 +572,16 @@ def main():
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
 
+    val_notes = []
     if validations:
         print(f"Processing {len(validations)} pick validation update(s)...")
         for val in validations:
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
+            reason = str(val.get("reason", "")).strip()
             if row_idx and action in ["VALIDATED", "REJECTED"]:
                 sheet.update_cell(row_idx, 14, action)
+                val_notes.append(f"Row {row_idx} ({action}): {reason}")
                 print(f"Row {row_idx} marked as {action}.")
 
     raw_rows = sheet.get_all_values()
@@ -575,6 +621,10 @@ def main():
             ""
         ])
         appended_count += 1
+
+    # Log to Evolution & Learnings Tab
+    val_summary_str = " ; ".join(val_notes) if val_notes else f"Added {appended_count} new pick(s)."
+    update_evolution_log(spreadsheet, "WNBA", updated_memory, val_summary_str, current_time_str)
 
     print(f"WNBA Execution Complete: {appended_count} new/updated pick(s) added, {skipped_count} duplicate(s) skipped.")
 
