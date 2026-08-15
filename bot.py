@@ -9,7 +9,7 @@ from google import genai
 
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheet():
-    print("Connecting to Google Sheets...")
+    print("Connecting to Google Sheets (MLB Tab)...")
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -21,11 +21,14 @@ def get_sheet():
     creds_dict = json.loads(service_account_str)
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
-    sheet = client.open("MLB AI Betting Tracker").sheet1
+    
+    # Opens spreadsheet and selects MLB tab explicitly
+    spreadsheet = client.open("MLB AI Betting Tracker")
+    sheet = spreadsheet.worksheet("MLB")
     return sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers including Sportsbook info."""
+    """Ensures row 1 contains bold, frozen column headers."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -35,7 +38,7 @@ def ensure_headers(sheet):
         ]
 
         if len(existing_rows) == 0:
-            print("Writing column headers...")
+            print("Writing MLB column headers...")
             sheet.append_row(headers)
             try:
                 sheet.format("A1:M1", {"textFormat": {"bold": True}})
@@ -45,9 +48,9 @@ def ensure_headers(sheet):
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
-# --- 2. BATCH AUTO-GRADING WITH DATE SAFEGUARDS ---
+# --- 2. BATCH AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Fetches completed MLB scores and updates PENDING rows safely."""
+    """Fetches completed MLB scores and updates PENDING rows safely in batch."""
     try:
         records = sheet.get_all_records()
         if not records:
@@ -55,14 +58,14 @@ def auto_grade_pending_bets(sheet, odds_key):
 
         pending_rows = [i for i, r in enumerate(records) if str(r.get("Status", "")).upper() == "PENDING"]
         if not pending_rows:
-            print("No pending bets to grade.")
+            print("No pending MLB bets to grade.")
             return
 
-        print(f"Checking results for {len(pending_rows)} pending bet(s)...")
+        print(f"Checking results for {len(pending_rows)} pending MLB bet(s)...")
         scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200:
-            print(f"Could not fetch score data. Status code: {resp.status_code}")
+            print(f"Could not fetch MLB score data. Status code: {resp.status_code}")
             return
 
         scores_data = resp.json()
@@ -86,16 +89,14 @@ def auto_grade_pending_bets(sheet, odds_key):
             except (ValueError, TypeError):
                 units = 1.0
 
-            # Match against finished games on or after game_date
             for match in scores_data:
                 if not match.get("completed"):
                     continue
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                commence_time = match.get("commence_time", "")[:10]  # Extracts YYYY-MM-DD
+                commence_time = match.get("commence_time", "")[:10]
 
-                # Match teams and ensure game commence date is >= prediction date
                 if (home_team in game_title or away_team in game_title) and (commence_time >= game_date):
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
@@ -115,7 +116,6 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                     print(f"Graded Row {row_idx}: {game_title} ({commence_time}) -> {status} (${round(profit, 2)})")
 
-                    # Stage update (Column K: Status, Column L: P/L ($))
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
                         "values": [[status, round(profit, 2)]]
@@ -123,9 +123,9 @@ def auto_grade_pending_bets(sheet, odds_key):
                     break
 
         if updates:
-            print(f"Batch updating {len(updates)} row(s) in Google Sheets...")
+            print(f"Batch updating {len(updates)} row(s) in MLB tab...")
             sheet.batch_update(updates)
-            print("Successfully auto-graded pending bets!")
+            print("Successfully auto-graded pending MLB bets!")
 
     except Exception as e:
         print(f"Auto-grading completed with notice: {e}")
@@ -208,9 +208,9 @@ def fetch_mlb_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 5. GENERATE PICKS VIA GEMINI (APPROVED SPORTSBOOKS ONLY) ---
+# --- 5. GENERATE PICKS VIA GEMINI ---
 def generate_picks(odds_data, memory):
-    print("Sending odds data and performance memory to Gemini...")
+    print("Sending MLB odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -233,7 +233,7 @@ def generate_picks(odds_data, memory):
 
     INSTRUCTIONS:
     1. Review your historical performance and strategy guidance in your memory above.
-    2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV bets from the 4 allowed sportsbooks.
+    2. Analyze today's games, calculate implied probabilities vs model probabilities, and select exactly 5 high-EV bets.
     3. Return strictly a JSON array of 5 objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
@@ -264,22 +264,20 @@ def main():
     odds = fetch_mlb_odds(odds_key)
 
     if not odds:
-        print("WARNING: No live odds returned. Skipping pick generation.")
+        print("WARNING: No live MLB odds returned. Skipping pick generation.")
         return
 
     picks = generate_picks(odds, updated_memory)
-
-    # Current Eastern Timestamp
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
-    print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets...")
+    print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets (MLB Tab)...")
 
     for p in picks:
         sheet.append_row([
             p.get("date", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")),
-            current_time_str,  # Column B: Pulled Time
+            current_time_str,
             p.get("game", ""),
-            p.get("bet_type", ""),  # Column D: Bet Type / Sportsbook
+            p.get("bet_type", ""),
             p.get("pick", ""),
             p.get("odds", ""),
             p.get("implied_prob", ""),
@@ -291,7 +289,7 @@ def main():
             p.get("reasoning", "")
         ])
     
-    print("Successfully published adaptive picks!")
+    print("Successfully published adaptive MLB picks!")
 
 if __name__ == "__main__":
     main()
