@@ -22,13 +22,12 @@ def get_sheet():
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
     
-    # Opens spreadsheet and selects MLB tab explicitly
     spreadsheet = client.open("MLB AI Betting Tracker")
     sheet = spreadsheet.worksheet("MLB")
     return sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers."""
+    """Ensures row 1 contains bold, frozen column headers in the MLB tab."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -37,14 +36,16 @@ def ensure_headers(sheet):
             "Status", "P/L ($)", "Reasoning"
         ]
 
-        if len(existing_rows) == 0:
-            print("Writing MLB column headers...")
-            sheet.append_row(headers)
+        if len(existing_rows) == 0 or (len(existing_rows) > 0 and existing_rows[0][0] != "Date"):
+            print("Writing MLB column headers to row 1...")
+            sheet.insert_row(headers, index=1)
             try:
                 sheet.format("A1:M1", {"textFormat": {"bold": True}})
                 sheet.freeze(rows=1)
             except Exception as e:
                 print(f"Header formatting notice: {e}")
+        else:
+            print("Headers already exist on the MLB tab.")
     except Exception as e:
         print(f"Notice while checking headers: {e}")
 
@@ -269,17 +270,51 @@ def main():
 
     picks = generate_picks(odds, updated_memory)
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
-    print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets (MLB Tab)...")
+    existing_records = sheet.get_all_records()
+    appended_count = 0
+    skipped_count = 0
 
     for p in picks:
+        pick_date = p.get("date", today_date_str)
+        game = p.get("game", "")
+        bet_type = p.get("bet_type", "")
+        pick = p.get("pick", "")
+        
+        try:
+            odds_val = float(p.get("odds", -110))
+        except (ValueError, TypeError):
+            odds_val = -110.0
+
+        is_duplicate = False
+        for r in existing_records:
+            r_date = str(r.get("Date", "")).strip()
+            r_game = str(r.get("Game", "")).strip()
+            r_bet_type = str(r.get("Bet Type / Sportsbook", "")).strip()
+            r_pick = str(r.get("Pick", "")).strip()
+            
+            try:
+                r_odds = float(r.get("Odds", 0))
+            except (ValueError, TypeError):
+                r_odds = 0.0
+
+            if (r_date == pick_date and r_game == game and r_bet_type == bet_type and r_pick == pick and r_odds == odds_val):
+                is_duplicate = True
+                break
+
+        if is_duplicate:
+            print(f"Skipping duplicate pick: {game} | {pick} @ {odds_val}")
+            skipped_count += 1
+            continue
+
         sheet.append_row([
-            p.get("date", datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")),
+            pick_date,
             current_time_str,
-            p.get("game", ""),
-            p.get("bet_type", ""),
-            p.get("pick", ""),
-            p.get("odds", ""),
+            game,
+            bet_type,
+            pick,
+            odds_val,
             p.get("implied_prob", ""),
             p.get("model_prob", ""),
             p.get("expected_value", ""),
@@ -288,8 +323,9 @@ def main():
             0.0,
             p.get("reasoning", "")
         ])
-    
-    print("Successfully published adaptive MLB picks!")
+        appended_count += 1
+
+    print(f"MLB Execution Complete: {appended_count} new/updated pick(s) added, {skipped_count} duplicate(s) skipped.")
 
 if __name__ == "__main__":
     main()
