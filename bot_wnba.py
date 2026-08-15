@@ -9,7 +9,7 @@ from google import genai
 
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheet():
-    print("Connecting to Google Sheets...")
+    print("Connecting to Google Sheets (WNBA Tab)...")
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -21,11 +21,14 @@ def get_sheet():
     creds_dict = json.loads(service_account_str)
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
-    sheet = client.open("WNBA AI Betting Tracker").sheet1
+    
+    # Opens same spreadsheet and specifically selects WNBA tab
+    spreadsheet = client.open("MLB AI Betting Tracker")
+    sheet = spreadsheet.worksheet("WNBA")
     return sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers including Sportsbook info."""
+    """Ensures row 1 contains bold, frozen column headers."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -35,7 +38,7 @@ def ensure_headers(sheet):
         ]
 
         if len(existing_rows) == 0:
-            print("Writing column headers...")
+            print("Writing WNBA column headers...")
             sheet.append_row(headers)
             try:
                 sheet.format("A1:M1", {"textFormat": {"bold": True}})
@@ -55,14 +58,14 @@ def auto_grade_pending_bets(sheet, odds_key):
 
         pending_rows = [i for i, r in enumerate(records) if str(r.get("Status", "")).upper() == "PENDING"]
         if not pending_rows:
-            print("No pending bets to grade.")
+            print("No pending WNBA bets to grade.")
             return
 
-        print(f"Checking results for {len(pending_rows)} pending bet(s)...")
+        print(f"Checking results for {len(pending_rows)} pending WNBA bet(s)...")
         scores_url = f"https://api.the-odds-api.com/v4/sports/basketball_wnba/scores/?apiKey={odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200:
-            print(f"Could not fetch score data. Status code: {resp.status_code}")
+            print(f"Could not fetch WNBA score data. Status code: {resp.status_code}")
             return
 
         scores_data = resp.json()
@@ -86,7 +89,6 @@ def auto_grade_pending_bets(sheet, odds_key):
             except (ValueError, TypeError):
                 units = 1.0
 
-            # Match against finished games on or after game_date
             for match in scores_data:
                 if not match.get("completed"):
                     continue
@@ -121,9 +123,9 @@ def auto_grade_pending_bets(sheet, odds_key):
                     break
 
         if updates:
-            print(f"Batch updating {len(updates)} row(s) in Google Sheets...")
+            print(f"Batch updating {len(updates)} row(s) in WNBA tab...")
             sheet.batch_update(updates)
-            print("Successfully auto-graded pending bets!")
+            print("Successfully auto-graded pending WNBA bets!")
 
     except Exception as e:
         print(f"Auto-grading completed with notice: {e}")
@@ -206,7 +208,7 @@ def fetch_wnba_odds(odds_key):
         print(f"Error fetching odds: {resp.status_code}")
         return []
 
-# --- 5. GENERATE PICKS VIA GEMINI (APPROVED SPORTSBOOKS ONLY) ---
+# --- 5. GENERATE PICKS VIA GEMINI ---
 def generate_picks(odds_data, memory):
     print("Sending WNBA odds data and performance memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -231,7 +233,7 @@ def generate_picks(odds_data, memory):
 
     INSTRUCTIONS:
     1. Review your historical performance and strategy guidance in your memory above.
-    2. Analyze today's WNBA slate, calculate implied probabilities vs model probabilities, and select up to 5 high-EV bets (or fewer if fewer games exist).
+    2. Analyze today's WNBA slate, calculate implied probabilities vs model probabilities, and select up to 5 high-EV bets.
     3. Return strictly a JSON array of objects containing:
        "date", "game", "bet_type", "pick", "odds", "implied_prob", "model_prob", "expected_value", "units", "reasoning"
        
@@ -266,10 +268,9 @@ def main():
         return
 
     picks = generate_picks(odds, updated_memory)
-
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
-    print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets...")
+    print(f"Generated {len(picks)} bet pick(s). Appending to Google Sheets (WNBA Tab)...")
 
     for p in picks:
         sheet.append_row([
