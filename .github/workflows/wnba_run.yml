@@ -1,0 +1,36 @@
+name: WNBA AI Betting Pipeline
+
+on:
+  schedule:
+    - cron: '30 15 * * *' # Runs daily at 11:30 AM EDT (15:30 UTC)
+  workflow_dispatch:      # Enables manual trigger button
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo code
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run WNBA Betting Bot Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        run: python bot_wnba.py
+
+      - name: Commit Updated WNBA Bot Memory
+        run: |
+          git config --global user.name 'WNBA Bot Automator'
+          git config --global user.email 'bot@github-actions'
+          git add wnba_bot_memory.json || true
+          git commit -m "Update WNBA bot evaluation memory [skip ci]" || true
+          git push || true
