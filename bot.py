@@ -51,7 +51,7 @@ def ensure_headers(sheet):
 
 # --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Fetches completed MLB scores and grades pending rows only if game started after prediction was pulled."""
+    """Fetches completed MLB scores and grades pending rows safely in batch."""
     try:
         records = sheet.get_all_records()
         if not records:
@@ -96,16 +96,14 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
-                commence_time_raw = match.get("commence_time", "")  # e.g., "2026-08-15T18:10:00Z"
+                commence_time_raw = match.get("commence_time", "")
 
-                # Check if game teams match
                 if home_team in game_title or away_team in game_title:
-                    # Validate that the completed game started AFTER or ON the day prediction was made
                     game_commence_date = commence_time_raw[:10]
                     pulled_date = pulled_time_str[:10] if len(pulled_time_str) >= 10 else str(r.get("Date", "")).strip()
 
                     if game_commence_date < pulled_date:
-                        continue  # Skip old historical games between same teams
+                        continue
 
                     scores = match.get("scores")
                     if not scores or len(scores) < 2:
@@ -282,6 +280,34 @@ def generate_picks(odds_data, memory):
     clean_json = response.text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_json)
 
+# --- 7. HELPER FOR DEDUPLICATION ---
+def is_duplicate_pick(existing_records, pick_date, game, bet_type, pick, odds_val):
+    """Normalized comparison across Game, Bet Type, Pick, and Odds regardless of probability changes."""
+    norm_game = str(game).strip().lower()
+    norm_bet_type = str(bet_type).strip().lower()
+    norm_pick = str(pick).strip().lower()
+    norm_odds = int(round(float(odds_val)))
+
+    for r in existing_records:
+        r_date = str(r.get("Date", "")).strip()
+        r_game = str(r.get("Game", "")).strip().lower()
+        r_bet_type = str(r.get("Bet Type / Sportsbook", "")).strip().lower()
+        r_pick = str(r.get("Pick", "")).strip().lower()
+        
+        try:
+            r_odds = int(round(float(r.get("Odds", 0))))
+        except (ValueError, TypeError):
+            r_odds = 0
+
+        if (r_date == pick_date and 
+            r_game == norm_game and 
+            r_bet_type == norm_bet_type and 
+            r_pick == norm_pick and 
+            r_odds == norm_odds):
+            return True
+
+    return False
+
 # --- MAIN EXECUTION ---
 def main():
     spreadsheet, sheet = get_sheets()
@@ -312,7 +338,7 @@ def main():
     skipped_count = 0
 
     for p in picks:
-        pick_date = p.get("date", today_date_str)
+        pick_date = str(p.get("date", today_date_str)).strip()
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
@@ -322,25 +348,8 @@ def main():
         except (ValueError, TypeError):
             odds_val = -110.0
 
-        # Strict Deduplication Check: Same Game + Bet Type + Pick + Odds
-        is_duplicate = False
-        for r in existing_records:
-            r_date = str(r.get("Date", "")).strip()
-            r_game = str(r.get("Game", "")).strip()
-            r_bet_type = str(r.get("Bet Type / Sportsbook", "")).strip()
-            r_pick = str(r.get("Pick", "")).strip()
-            
-            try:
-                r_odds = float(r.get("Odds", 0))
-            except (ValueError, TypeError):
-                r_odds = 0.0
-
-            if (r_date == pick_date and r_game == game and r_bet_type == bet_type and r_pick == pick and r_odds == odds_val):
-                is_duplicate = True
-                break
-
-        if is_duplicate:
-            print(f"Skipping duplicate prediction: {game} | {pick} @ {odds_val}")
+        if is_duplicate_pick(existing_records, pick_date, game, bet_type, pick, odds_val):
+            print(f"Skipping duplicate prediction: {game} | {pick} @ {int(round(odds_val))}")
             skipped_count += 1
             continue
 
@@ -350,7 +359,7 @@ def main():
             game,
             bet_type,
             pick,
-            odds_val,
+            int(round(odds_val)),
             p.get("implied_prob", ""),
             p.get("model_prob", ""),
             p.get("expected_value", ""),
