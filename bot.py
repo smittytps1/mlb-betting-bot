@@ -103,9 +103,9 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINE, SPREAD, & TOTALS) ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets strictly if the game's start time is AFTER the prediction's pulled time."""
+    """Grades PENDING bets (Moneylines, Spreads/Run Lines, and Over/Under Totals) accurately."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -116,6 +116,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         try:
             status_idx = headers.index("Status")
             game_idx = headers.index("Game")
+            bet_type_idx = headers.index("Bet Type / Sportsbook")
             pick_idx = headers.index("Pick")
             pulled_idx = headers.index("Pulled Time")
             odds_idx = headers.index("Odds")
@@ -145,7 +146,8 @@ def auto_grade_pending_bets(sheet, odds_key):
 
         for row_idx, r in pending_rows:
             game_title = str(r[game_idx]).strip()
-            pick = str(r[pick_idx]).strip()
+            bet_type = str(r[bet_type_idx]).strip().lower()
+            pick_str = str(r[pick_idx]).strip()
             pulled_time_raw = str(r[pulled_idx]).strip()
             
             try:
@@ -188,17 +190,58 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                     home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                     away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+                    total_score = home_score + away_score
 
-                    winner = home_team if home_score > away_score else away_team
-                    is_win = (pick in winner or winner in pick)
-                    status = "WIN" if is_win else "LOSS"
+                    status = None
+                    profit = 0.0
 
-                    if is_win:
-                        profit = (100 / abs(odds)) * 100 * units if odds < 0 else (odds / 100) * 100 * units
+                    # Totals
+                    if "total" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
+                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                        if num_match:
+                            total_line = float(num_match.group(0))
+                            is_over = "over" in bet_type or "over" in pick_str.lower()
+                            
+                            if total_score == total_line:
+                                status = "PUSH"
+                                profit = 0.0
+                            elif (is_over and total_score > total_line) or (not is_over and total_score < total_line):
+                                status = "WIN"
+                            else:
+                                status = "LOSS"
+
+                    # Spreads / Run Line
+                    elif "spread" in bet_type or "run line" in bet_type:
+                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                        spread_val = float(num_match.group(0)) if num_match else 0.0
+                        
+                        is_home_pick = home_team.lower() in pick_str.lower()
+                        pick_score = home_score if is_home_pick else away_score
+                        opp_score = away_score if is_home_pick else home_score
+
+                        diff = (pick_score + spread_val) - opp_score
+                        if diff == 0:
+                            status = "PUSH"
+                            profit = 0.0
+                        elif diff > 0:
+                            status = "WIN"
+                        else:
+                            status = "LOSS"
+
+                    # Moneyline
                     else:
-                        profit = -100.0 * units
+                        winner = home_team if home_score > away_score else away_team
+                        is_win = (pick_str.lower() in winner.lower() or winner.lower() in pick_str.lower())
+                        status = "WIN" if is_win else "LOSS"
 
-                    print(f"Graded Row {row_idx}: {game_title} -> {status} (${round(profit, 2)})")
+                    if status == "WIN":
+                        profit = (100 / abs(odds)) * 100 * units if odds < 0 else (odds / 100) * 100 * units
+                    elif status == "LOSS":
+                        profit = -100.0 * units
+                    elif status == "PUSH":
+                        profit = 0.0
+
+                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
@@ -553,7 +596,6 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
-    # Initial Run Execution Snapshot
     update_evolution_log(spreadsheet, "MLB", updated_memory, "Execution started. Evaluating odds & open picks.", current_time_str)
 
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
@@ -620,7 +662,6 @@ def main():
         ])
         appended_count += 1
 
-    # Post-Synthesis Snapshot Log
     val_summary_str = " ; ".join(val_notes) if val_notes else f"Generated {appended_count} new pick(s)."
     update_evolution_log(spreadsheet, "MLB", updated_memory, val_summary_str, current_time_str)
 
