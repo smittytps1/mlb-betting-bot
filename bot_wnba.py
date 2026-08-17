@@ -71,7 +71,7 @@ def ensure_evolution_sheet(spreadsheet):
         return None
 
 def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
-    """Logs a live snapshot of the bot's learning, factor weights, and strategy evolution."""
+    """Logs a live snapshot of factor weights, learning reflections, and adjustments."""
     try:
         evo_sheet = ensure_evolution_sheet(spreadsheet)
         if not evo_sheet:
@@ -94,7 +94,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ROBUST AUTO-GRADING ENGINE (TOTALS, SPREADS, MONEYLINES) ---
+# --- 2. ROBUST AUTO-GRADING ENGINE ---
 def auto_grade_pending_bets(sheet, odds_key):
     """Grades PENDING bets accurately with isolated parser logic for Totals, Spreads, and Moneylines."""
     try:
@@ -183,19 +183,14 @@ def auto_grade_pending_bets(sheet, odds_key):
                     profit = 0.0
 
                     pick_lower = pick_str.lower()
-                    
-                    # 1. TOTALS (OVER / UNDER)
                     is_total_market = ("total" in bet_type or "over" in pick_lower or "under" in pick_lower or "o/u" in pick_lower)
                     
                     if is_total_market:
-                        # Extract the line (e.g. 188.5 from "Under 188.5" or "O 165")
                         num_match = re.search(r'(?:over|under|o/u|u|o)?\s*([0-9]+\.?[0-9]*)', pick_lower)
                         if num_match:
                             total_line = float(num_match.group(1))
                             is_over = bool(re.search(r'\b(over|o)\b', pick_lower))
                             is_under = bool(re.search(r'\b(under|u)\b', pick_lower))
-
-                            # Default to pick string direction
                             if not is_over and not is_under:
                                 is_over = "over" in pick_lower
 
@@ -207,7 +202,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                             else:
                                 status = "LOSS"
 
-                    # 2. SPREADS
                     elif "spread" in bet_type or re.search(r'[-+]\d+\.?\d*', pick_str):
                         spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
                         spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
@@ -225,7 +219,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                         else:
                             status = "LOSS"
 
-                    # 3. MONEYLINE
                     else:
                         winner = home_team if home_score > away_score else away_team
                         is_win = (pick_lower in winner.lower() or winner.lower() in pick_lower)
@@ -238,7 +231,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                     elif status == "PUSH":
                         profit = 0.0
 
-                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] (Final: {away_score}-{home_score}, Total: {total_score}) -> {status} (${round(profit, 2)})")
+                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
@@ -386,7 +379,7 @@ def update_memory_from_sheet(sheet, memory):
 
     return memory
 
-# --- 5. FETCH WNBA ODDS & ACTIVE TODAY PICKS ---
+# --- 5. FETCH WNBA ODDS & GET TODAY'S OPEN PICKS ---
 def fetch_wnba_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/basketball_wnba/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live WNBA odds...")
@@ -400,6 +393,7 @@ def fetch_wnba_odds(odds_key):
         return []
 
 def get_today_existing_picks(sheet, today_date_str):
+    """Retrieves all PENDING picks logged for today with exact row indices."""
     rows = sheet.get_all_values()
     if len(rows) <= 1:
         return []
@@ -418,58 +412,59 @@ def get_today_existing_picks(sheet, today_date_str):
                     "bet_type": r[3] if len(r) > 3 else "",
                     "pick": r[4] if len(r) > 4 else "",
                     "odds": r[5] if len(r) > 5 else "",
+                    "implied_prob": r[6] if len(r) > 6 else "",
+                    "model_prob": r[7] if len(r) > 7 else "",
+                    "expected_value": r[8] if len(r) > 8 else "",
                     "reasoning": r[12] if len(r) > 12 else "",
                     "validation": r[13] if len(r) > 13 else ""
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI ---
+# --- 6. GENERATE PICKS & RE-EVALUATE OPEN PICKS ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
-    print("Sending WNBA odds data, factor weights, active picks, and memory to Gemini...")
+    print("Sending WNBA odds data, factor weights, and open picks to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
     You are an adaptive quantitative WNBA betting expert that performs deep multi-factor synthesis.
 
-    === YOUR HISTORICAL MEMORY & PERFORMANCE REFLECTION ===
+    === RECURSIVE MEMORY & FACTOR WEIGHTS ===
     {json.dumps(memory, indent=2)}
 
-    === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM PAST RESULTS) ===
-    {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
-
-    FACTOR WEIGHTING INSTRUCTIONS:
-    - HIGH WEIGHT FACTORS (Weight > 1.2): Prioritize these analytical factors when calculating model probability.
-    - LOW WEIGHT FACTORS (Weight < 0.8): DE-EMPHASIZE their influence. They MUST NOT be the primary driver or sole justification for a pick, but can be used as secondary supporting context.
-
-    === ACTIVE OPEN PICKS PREVIOUSLY LOGGED TODAY ===
+    === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
 
-    === TODAY'S LIVE WNBA ODDS DATA ===
+    === TODAY'S LIVE WNBA ODDS ===
     {json.dumps(odds_data[:8])}
 
-    STRICT SPORTSBOOK CONSTRAINTS:
-    - Recommend bets where the pick and odds are placed on one of these 4 approved sportsbooks:
-      1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars
+    STRICT RE-EVALUATION & SYNTHESIS RULES:
+    1. EVALUATE EXISTING OPEN PICKS:
+       For every pick listed in ACTIVE OPEN PICKS:
+       - If you agree with the current side/pick: 
+         Set "action": "VALIDATED". 
+         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", and "reason".
+         DO NOT create a duplicate entry in "new_picks".
+       - If market movement, injury news, or deeper analysis means the OPPOSITE side is now superior:
+         Set "action": "REJECTED" with "reason".
+         Put the NEW opposite pick into "new_picks".
 
-    SYNTHESIS & VALIDATION INSTRUCTIONS:
-    1. REVIEW PREVIOUS PICKS: Look at the active open picks previously logged today above.
-    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick, combine arguments for BOTH teams to determine true +EV.
-    3. VALIDATE OR REJECT EXISTING PICKS:
-       - If an existing pick remains best, output "action": "VALIDATED".
-       - If opposing analysis proves superior, mark the old pick as "action": "REJECTED", and output the new superior bet in "new_picks".
-    4. NEW BETS: Select up to 5 total high-EV picks for games not yet covered.
+    2. NEW MATCHUPS:
+       - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
+       - Never recommend more than 5 total active bets across the entire slate.
+       - Use sportsbooks: FanDuel, DraftKings, BetMGM, Caesars.
 
-    FORMATTING REQUIREMENTS:
-    Return strictly a single JSON object with two arrays: "validations" and "new_picks".
-
-    JSON Structure:
+    OUTPUT SCHEMA (STRICT JSON ONLY):
     {{
       "validations": [
         {{
-          "row_index": <int from open_picks>,
+          "row_index": <int matching row_index in open_picks>,
           "action": "VALIDATED" or "REJECTED",
-          "reason": "<brief justification>"
+          "updated_odds": <int or float, e.g. -110>,
+          "updated_implied_prob": "52.4%",
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+10.7%",
+          "reason": "<reasoning explaining why it is validated or rejected>"
         }}
       ],
       "new_picks": [
@@ -525,7 +520,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     return {"validations": [], "new_picks": []}
 
-# --- 7. DEDUPLICATION HELPER ---
+# --- 7. GAME-LEVEL DEDUPLICATION HELPER ---
 def normalize_string(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
@@ -534,7 +529,8 @@ def extract_sorted_teams(game_str):
     cleaned = [normalize_string(p) for p in parts if p.strip()]
     return tuple(sorted(cleaned))
 
-def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
+def game_already_pending(raw_rows, pick_date, game):
+    """Checks if there is already an active pending pick for this exact game today."""
     if len(raw_rows) <= 1:
         return False
 
@@ -542,39 +538,21 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
     try:
         date_col = headers.index("Date")
         game_col = headers.index("Game")
-        bet_type_col = headers.index("Bet Type / Sportsbook")
-        pick_col = headers.index("Pick")
-        odds_col = headers.index("Odds")
+        status_col = headers.index("Status")
     except ValueError:
         return False
 
     norm_teams = extract_sorted_teams(game)
-    norm_bet_type = normalize_string(bet_type)
-    norm_pick = normalize_string(pick)
-    try:
-        norm_odds = int(round(float(odds_val)))
-    except (ValueError, TypeError):
-        norm_odds = 0
 
     for r in raw_rows[1:]:
-        if len(r) <= max(date_col, game_col, bet_type_col, pick_col, odds_col):
+        if len(r) <= max(date_col, game_col, status_col):
             continue
 
         r_date = str(r[date_col]).strip()
         r_teams = extract_sorted_teams(r[game_col])
-        r_bet_type = normalize_string(r[bet_type_col])
-        r_pick = normalize_string(r[pick_col])
-        
-        try:
-            r_odds = int(round(float(r[odds_col])))
-        except (ValueError, TypeError):
-            r_odds = 0
+        r_status = str(r[status_col]).strip().upper()
 
-        if (r_date == pick_date and 
-            r_teams == norm_teams and 
-            r_bet_type == norm_bet_type and 
-            r_pick == norm_pick and 
-            r_odds == norm_odds):
+        if r_date == pick_date and r_teams == norm_teams and r_status == "PENDING":
             return True
 
     return False
@@ -613,17 +591,37 @@ def main():
     new_picks = ai_response.get("new_picks", [])
 
     val_notes = []
+    
+    # 1. Process Validations & Updates on Existing Rows in Place
     if validations:
         print(f"Processing {len(validations)} pick validation update(s)...")
         for val in validations:
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
+
             if row_idx and action in ["VALIDATED", "REJECTED"]:
+                # Update Column N (Validation)
                 sheet.update_cell(row_idx, 14, action)
                 val_notes.append(f"Row {row_idx} ({action}): {reason}")
-                print(f"Row {row_idx} marked as {action}.")
 
+                # If Validated and new line info is provided, update line & reasoning in place
+                if action == "VALIDATED":
+                    if "updated_odds" in val and val["updated_odds"]:
+                        sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    if "updated_implied_prob" in val and val["updated_implied_prob"]:
+                        sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
+                    if "updated_model_prob" in val and val["updated_model_prob"]:
+                        sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if "updated_expected_value" in val and val["updated_expected_value"]:
+                        sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    if reason:
+                        sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+
+                print(f"Row {row_idx} evaluated as {action}.")
+
+    # 2. Append Only Genuinely New / Replacement Picks
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
@@ -639,8 +637,9 @@ def main():
         except (ValueError, TypeError):
             odds_val = -110.0
 
-        if is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-            print(f"Skipping duplicate prediction: {game} | {pick} @ {int(round(odds_val))}")
+        # Check if an active pending bet already exists for this game
+        if game_already_pending(raw_rows, pick_date, game):
+            print(f"Skipping duplicate game prediction: {game} | {pick}")
             skipped_count += 1
             continue
 
@@ -658,7 +657,7 @@ def main():
             "PENDING",
             0.0,
             p.get("reasoning", ""),
-            ""
+            "NEW"
         ])
         appended_count += 1
 
