@@ -94,9 +94,9 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINES, SPREADS, TOTALS) ---
+# --- 2. ROBUST AUTO-GRADING ENGINE (TOTALS, SPREADS, MONEYLINES) ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets (Moneylines, Spreads, and Over/Under Totals)."""
+    """Grades PENDING bets accurately with isolated parser logic for Totals, Spreads, and Moneylines."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -182,25 +182,37 @@ def auto_grade_pending_bets(sheet, odds_key):
                     status = None
                     profit = 0.0
 
-                    # 1. OVER / UNDER TOTALS
-                    if "total" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
-                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                    pick_lower = pick_str.lower()
+                    
+                    # 1. TOTALS (OVER / UNDER)
+                    is_total_market = ("total" in bet_type or "over" in pick_lower or "under" in pick_lower or "o/u" in pick_lower)
+                    
+                    if is_total_market:
+                        # Extract the line (e.g. 188.5 from "Under 188.5" or "O 165")
+                        num_match = re.search(r'(?:over|under|o/u|u|o)?\s*([0-9]+\.?[0-9]*)', pick_lower)
                         if num_match:
-                            total_line = float(num_match.group(0))
-                            is_over = "over" in bet_type or "over" in pick_str.lower()
+                            total_line = float(num_match.group(1))
+                            is_over = bool(re.search(r'\b(over|o)\b', pick_lower))
+                            is_under = bool(re.search(r'\b(under|u)\b', pick_lower))
+
+                            # Default to pick string direction
+                            if not is_over and not is_under:
+                                is_over = "over" in pick_lower
+
                             if total_score == total_line:
                                 status = "PUSH"
                                 profit = 0.0
-                            elif (is_over and total_score > total_line) or (not is_over and total_score < total_line):
+                            elif (is_over and total_score > total_line) or (is_under and total_score < total_line):
                                 status = "WIN"
                             else:
                                 status = "LOSS"
 
                     # 2. SPREADS
-                    elif "spread" in bet_type:
-                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
-                        spread_val = float(num_match.group(0)) if num_match else 0.0
-                        is_home_pick = home_team.lower() in pick_str.lower()
+                    elif "spread" in bet_type or re.search(r'[-+]\d+\.?\d*', pick_str):
+                        spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
+                        spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
+                        
+                        is_home_pick = home_team.lower() in pick_lower
                         pick_score = home_score if is_home_pick else away_score
                         opp_score = away_score if is_home_pick else home_score
 
@@ -216,7 +228,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                     # 3. MONEYLINE
                     else:
                         winner = home_team if home_score > away_score else away_team
-                        is_win = (pick_str.lower() in winner.lower() or winner.lower() in pick_str.lower())
+                        is_win = (pick_lower in winner.lower() or winner.lower() in pick_lower)
                         status = "WIN" if is_win else "LOSS"
 
                     if status == "WIN":
@@ -226,7 +238,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                     elif status == "PUSH":
                         profit = 0.0
 
-                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] -> {status} (${round(profit, 2)})")
+                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] (Final: {away_score}-{home_score}, Total: {total_score}) -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
