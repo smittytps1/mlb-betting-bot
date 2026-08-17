@@ -96,7 +96,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINES, SPREADS, TOTALS) ---
 def auto_grade_pending_bets(sheet, odds_key):
     """Grades PENDING bets (Moneylines, Spreads, and Over/Under Totals)."""
     try:
