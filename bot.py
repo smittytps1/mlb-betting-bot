@@ -480,30 +480,40 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     }}
     """
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            
-            text = response.text.strip()
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_json)
+    # Upgraded to current Gemini 3 production models
+    candidate_models = [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview"
+    ]
 
-        except errors.ClientError as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                wait_time = (attempt + 1) * 10
-                print(f"Rate limit (429) hit. Retrying in {wait_time}s (Attempt {attempt + 1}/{max_retries})...")
-                time.sleep(wait_time)
-            else:
-                print(f"Gemini API Error: {e}")
+    for model_name in candidate_models:
+        for attempt in range(2):
+            try:
+                print(f"Attempting pick synthesis with model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                
+                text = response.text.strip()
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("```", "").strip()
+                return json.loads(clean_json)
+
+            except errors.ClientError as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    time.sleep(5)
+                elif "404" in str(e):
+                    print(f"Model {model_name} returned 404, falling back to next model...")
+                    break
+                else:
+                    print(f"Gemini API Error with {model_name}: {e}")
+                    break
+            except Exception as e:
+                print(f"Error during pick generation: {e}")
                 break
-        except Exception as e:
-            print(f"Error during pick generation: {e}")
-            break
 
     return {"validations": [], "new_picks": []}
 
