@@ -6,7 +6,6 @@ import requests
 import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import errors
 
@@ -22,15 +21,14 @@ def get_sheets():
         raise ValueError("GCP_SERVICE_ACCOUNT_JSON environment variable is missing!")
     
     creds_dict = json.loads(service_account_str)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
+    client = gspread.service_account_from_dict(creds_dict, scopes=scopes)
     
     spreadsheet = client.open("MLB AI Betting Tracker")
     sheet = spreadsheet.worksheet("WNBA")
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers including Validation."""
+    """Ensures row 1 contains column headers including Validation."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -39,41 +37,84 @@ def ensure_headers(sheet):
             "Status", "P/L ($)", "Reasoning", "Validation"
         ]
 
-        if len(existing_rows) == 0 or (len(existing_rows) > 0 and existing_rows[0][0] != "Date"):
+        if not existing_rows or not existing_rows[0] or existing_rows[0][0] != "Date":
             print("Writing WNBA column headers to row 1...")
             sheet.insert_row(headers, index=1)
-            try:
-                sheet.format("A1:N1", {"textFormat": {"bold": True}})
-                sheet.freeze(rows=1)
-            except Exception as e:
-                print(f"Header formatting notice: {e}")
         else:
             if len(existing_rows[0]) < 14 or existing_rows[0][13] != "Validation":
                 sheet.update_cell(1, 14, "Validation")
-                sheet.format("N1", {"textFormat": {"bold": True}})
     except Exception as e:
-        print(f"Notice while checking headers: {e}")
+        print(f"Header formatting notice: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
+def ensure_evolution_sheet(spreadsheet):
+    """Safely guarantees the 'Evolution & Learnings' tab exists and has headers."""
+    try:
+        try:
+            evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
+        except Exception:
+            print("Creating 'Evolution & Learnings' worksheet tab...")
+            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=200, cols=10)
+
+        existing_rows = evo_sheet.get_all_values()
+        headers = [
+            "Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", 
+            "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
+        ]
+
+        if not existing_rows or len(existing_rows) == 0 or len(existing_rows[0]) == 0 or existing_rows[0][0] != "Timestamp":
+            print("Writing headers to 'Evolution & Learnings' tab...")
+            evo_sheet.insert_row(headers, index=1)
+
+        return evo_sheet
+    except Exception as e:
+        print(f"Notice while ensuring Evolution sheet: {e}")
+        return None
+
+def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
+    """Logs a live snapshot of the bot's learning, factor weights, and strategy evolution."""
+    try:
+        evo_sheet = ensure_evolution_sheet(spreadsheet)
+        if not evo_sheet:
+            return
+
+        factors = memory.get("reasoning_factor_weights", {})
+        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
+
+        evo_sheet.append_row([
+            current_time_str,
+            sport_label,
+            memory.get("total_bets", 0),
+            memory.get("win_rate", "0%"),
+            memory.get("net_profit_dollars", 0.0),
+            weights_str if weights_str else "Standard (1.0x)",
+            memory.get("learnings_and_adjustments", "Maintain standard criteria."),
+            validations_summary if validations_summary else "Execution logged."
+        ])
+        print(f"Evolution & Learnings tab updated successfully for {sport_label}!")
+    except Exception as e:
+        print(f"Notice while logging to Evolution tab: {e}")
+
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINES, SPREADS, TOTALS) ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets strictly if the game's start time is AFTER the prediction's pulled time."""
+    """Grades PENDING bets (Moneylines, Spreads, and Over/Under Totals)."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
-            return
+            return 0
 
         headers = [h.strip() for h in rows[0]]
         
         try:
             status_idx = headers.index("Status")
             game_idx = headers.index("Game")
+            bet_type_idx = headers.index("Bet Type / Sportsbook")
             pick_idx = headers.index("Pick")
             pulled_idx = headers.index("Pulled Time")
             odds_idx = headers.index("Odds")
             units_idx = headers.index("Units")
         except ValueError as e:
-            print(f"Auto-grading skipped: Missing required header column - {e}")
-            return
+            print(f"Auto-grading skipped: Missing header - {e}")
+            return 0
 
         pending_rows = []
         for row_idx, r in enumerate(rows[1:], start=2):
@@ -82,32 +123,29 @@ def auto_grade_pending_bets(sheet, odds_key):
 
         if not pending_rows:
             print("No pending WNBA bets to grade.")
-            return
+            return 0
 
         print(f"Checking results for {len(pending_rows)} pending WNBA bet(s)...")
         scores_url = f"https://api.the-odds-api.com/v4/sports/basketball_wnba/scores/?apiKey={odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200:
             print(f"Could not fetch WNBA score data. Status code: {resp.status_code}")
-            return
+            return 0
 
         scores_data = resp.json()
         updates = []
 
         for row_idx, r in pending_rows:
             game_title = str(r[game_idx]).strip()
-            pick = str(r[pick_idx]).strip()
+            bet_type = str(r[bet_type_idx]).strip().lower()
+            pick_str = str(r[pick_idx]).strip()
             pulled_time_raw = str(r[pulled_idx]).strip()
             
-            try:
-                odds = float(r[odds_idx])
-            except (ValueError, TypeError):
-                odds = -110.0
+            try: odds = float(r[odds_idx])
+            except (ValueError, TypeError): odds = -110.0
 
-            try:
-                units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
-            except (ValueError, TypeError):
-                units = 1.0
+            try: units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
+            except (ValueError, TypeError): units = 1.0
 
             pulled_dt = None
             try:
@@ -139,17 +177,56 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                     home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                     away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+                    total_score = home_score + away_score
 
-                    winner = home_team if home_score > away_score else away_team
-                    is_win = (pick in winner or winner in pick)
-                    status = "WIN" if is_win else "LOSS"
+                    status = None
+                    profit = 0.0
 
-                    if is_win:
-                        profit = (100 / abs(odds)) * 100 * units if odds < 0 else (odds / 100) * 100 * units
+                    # 1. OVER / UNDER TOTALS
+                    if "total" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
+                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                        if num_match:
+                            total_line = float(num_match.group(0))
+                            is_over = "over" in bet_type or "over" in pick_str.lower()
+                            if total_score == total_line:
+                                status = "PUSH"
+                                profit = 0.0
+                            elif (is_over and total_score > total_line) or (not is_over and total_score < total_line):
+                                status = "WIN"
+                            else:
+                                status = "LOSS"
+
+                    # 2. SPREADS
+                    elif "spread" in bet_type:
+                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                        spread_val = float(num_match.group(0)) if num_match else 0.0
+                        is_home_pick = home_team.lower() in pick_str.lower()
+                        pick_score = home_score if is_home_pick else away_score
+                        opp_score = away_score if is_home_pick else home_score
+
+                        diff = (pick_score + spread_val) - opp_score
+                        if diff == 0:
+                            status = "PUSH"
+                            profit = 0.0
+                        elif diff > 0:
+                            status = "WIN"
+                        else:
+                            status = "LOSS"
+
+                    # 3. MONEYLINE
                     else:
-                        profit = -100.0 * units
+                        winner = home_team if home_score > away_score else away_team
+                        is_win = (pick_str.lower() in winner.lower() or winner.lower() in pick_str.lower())
+                        status = "WIN" if is_win else "LOSS"
 
-                    print(f"Graded Row {row_idx}: {game_title} -> {status} (${round(profit, 2)})")
+                    if status == "WIN":
+                        profit = (100 / abs(odds)) * 100 * units if odds < 0 else (odds / 100) * 100 * units
+                    elif status == "LOSS":
+                        profit = -100.0 * units
+                    elif status == "PUSH":
+                        profit = 0.0
+
+                    print(f"Graded Row {row_idx}: {game_title} [{pick_str}] -> {status} (${round(profit, 2)})")
 
                     updates.append({
                         "range": f"K{row_idx}:L{row_idx}",
@@ -161,13 +238,14 @@ def auto_grade_pending_bets(sheet, odds_key):
             print(f"Batch updating {len(updates)} row(s) in WNBA tab...")
             sheet.batch_update(updates)
             print("Successfully auto-graded pending WNBA bets!")
+            return len(updates)
 
     except Exception as e:
         print(f"Auto-grading completed with notice: {e}")
+    return 0
 
-# --- 3. SCOREBOARD & EVOLUTION TAB UPDATERS ---
+# --- 3. SCOREBOARD UPDATER ---
 def update_scoreboard(spreadsheet):
-    """Ensures the 'Scoreboard' tab exists and contains dynamic formulas for both bots."""
     try:
         try:
             sb_sheet = spreadsheet.worksheet("Scoreboard")
@@ -182,51 +260,11 @@ def update_scoreboard(spreadsheet):
         ]
 
         sb_sheet.update(range_name="A1:F4", values=scoreboard_data, value_input_option="USER_ENTERED")
-        sb_sheet.format("A1:F1", {"textFormat": {"bold": True}})
-        sb_sheet.format("E2:E4", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-        sb_sheet.format("F2:F4", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
         print("Scoreboard tab successfully updated with live formulas!")
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
-    """Logs a snapshot of the bot's learning, factor weights, and strategy evolution."""
-    try:
-        try:
-            evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
-        except Exception:
-            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=100, cols=10)
-
-        existing_rows = evo_sheet.get_all_values()
-        headers = [
-            "Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", 
-            "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
-        ]
-
-        if len(existing_rows) == 0 or existing_rows[0][0] != "Timestamp":
-            evo_sheet.insert_row(headers, index=1)
-            evo_sheet.format("A1:H1", {"textFormat": {"bold": True}})
-            evo_sheet.freeze(rows=1)
-
-        factors = memory.get("reasoning_factor_weights", {})
-        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
-
-        evo_sheet.append_row([
-            current_time_str,
-            sport_label,
-            memory.get("total_bets", 0),
-            memory.get("win_rate", "0%"),
-            memory.get("net_profit_dollars", 0.0),
-            weights_str if weights_str else "Standard (1.0x)",
-            memory.get("learnings_and_adjustments", "Maintain standard criteria."),
-            validations_summary if validations_summary else "No re-synthesis needed."
-        ])
-        print("Evolution & Learnings tab updated successfully!")
-    except Exception as e:
-        print(f"Notice while logging to Evolution tab: {e}")
-
-# --- 4. MEMORY MANAGEMENT & WNBA REASONING FACTOR WEIGHTING ---
+# --- 4. RECURSIVE MEMORY & FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("wnba_bot_memory.json"):
         try:
@@ -243,30 +281,10 @@ def load_memory():
         "net_profit_dollars": 0.0,
         "learnings_and_adjustments": "Maintain balanced quantitative evaluation.",
         "reasoning_factor_weights": {
-            "rest_and_schedule": {
-                "wins": 0,
-                "losses": 0,
-                "weight": 1.0,
-                "instruction": "Standard weighting on rest days, travel, and back-to-back schedule advantages."
-            },
-            "roster_rotation_depth": {
-                "wins": 0,
-                "losses": 0,
-                "weight": 1.0,
-                "instruction": "Standard weighting on bench rotation, injuries, and key player availability."
-            },
-            "pace_and_efficiency": {
-                "wins": 0,
-                "losses": 0,
-                "weight": 1.0,
-                "instruction": "Standard weighting on offensive/defensive ratings, turnovers, and game tempo."
-            },
-            "rebounding_and_paint_dominance": {
-                "wins": 0,
-                "losses": 0,
-                "weight": 1.0,
-                "instruction": "Standard weighting on interior scoring, second-chance points, and rebound differential."
-            }
+            "rest_and_schedule": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Standard weighting on rest days and schedule fatigue."},
+            "roster_rotation_depth": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Standard weighting on bench rotation and key injuries."},
+            "pace_and_efficiency": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Standard weighting on offensive/defensive ratings and tempo."},
+            "rebounding_and_paint_dominance": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Standard weighting on interior paint points and rebound rate."}
         }
     }
     with open("wnba_bot_memory.json", "w") as f:
@@ -276,14 +294,14 @@ def load_memory():
 def calculate_factor_weight(wins, losses):
     total = wins + losses
     if total < 3:
-        return 1.0, "Baseline sample size. Maintain standard weighting."
+        return 1.0, "Baseline sample size. Standard weighting."
     win_rate = wins / total
     if win_rate >= 0.65:
-        return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor heavily when establishing edge."
+        return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor heavily."
     elif win_rate <= 0.40:
-        return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize as a primary driver; use only as secondary support."
+        return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize as primary driver; use as secondary support."
     else:
-        return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%). Maintain standard weighting."
+        return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%). Standard weighting."
 
 def update_memory_from_sheet(sheet, memory):
     try:
@@ -393,7 +411,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI WITH WEIGHTED REASONING SYNTHESIS ---
+# --- 6. GENERATE PICKS VIA GEMINI ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
     print("Sending WNBA odds data, factor weights, active picks, and memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -424,10 +442,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     SYNTHESIS & VALIDATION INSTRUCTIONS:
     1. REVIEW PREVIOUS PICKS: Look at the active open picks previously logged today above.
-    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick, combine the arguments for BOTH teams (applying factor weights) and determine which side holds superior true +EV value.
+    2. SYNTHESIZE OPPOSING LOGIC: If your analysis finds a compelling case for the opposite side of an existing pick, combine arguments for BOTH teams to determine true +EV.
     3. VALIDATE OR REJECT EXISTING PICKS:
-       - If an existing pick remains the best stance, output an object in "validations" with action "VALIDATED".
-       - If synthesized analysis shows the opposing side or a new bet is superior, mark the old pick in "validations" as action "REJECTED", and output the new superior bet in "new_picks".
+       - If an existing pick remains best, output "action": "VALIDATED".
+       - If opposing analysis proves superior, mark the old pick as "action": "REJECTED", and output the new superior bet in "new_picks".
     4. NEW BETS: Select up to 5 total high-EV picks for games not yet covered.
 
     FORMATTING REQUIREMENTS:
@@ -439,7 +457,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
         {{
           "row_index": <int from open_picks>,
           "action": "VALIDATED" or "REJECTED",
-          "reason": "<brief justification for validation or rejection>"
+          "reason": "<brief justification>"
         }}
       ],
       "new_picks": [
@@ -459,32 +477,39 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     }}
     """
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            chat = client.chats.create(model="gemini-3.6-flash")
-            response = chat.send_message(prompt)
-            
-            text = response.text.strip()
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            if json_match:
-                clean_json = json_match.group(0)
-            else:
-                clean_json = text.replace("```json", "").replace("```", "").strip()
+    candidate_models = [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview"
+    ]
 
-            return json.loads(clean_json)
+    for model_name in candidate_models:
+        for attempt in range(2):
+            try:
+                print(f"Attempting pick synthesis with model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                
+                text = response.text.strip()
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("```", "").strip()
+                return json.loads(clean_json)
 
-        except errors.ClientError as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                wait_time = (attempt + 1) * 10
-                print(f"Rate limit (429) hit. Retrying in {wait_time} seconds (Attempt {attempt + 1}/{max_retries})...")
-                time.sleep(wait_time)
-            else:
-                print(f"Gemini API Error: {e}")
+            except errors.ClientError as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    time.sleep(5)
+                elif "404" in str(e):
+                    print(f"Model {model_name} returned 404, falling back to next model...")
+                    break
+                else:
+                    print(f"Gemini API Error with {model_name}: {e}")
+                    break
+            except Exception as e:
+                print(f"Error during pick generation: {e}")
                 break
-        except Exception as e:
-            print(f"Unexpected error during pick generation: {e}")
-            break
 
     return {"validations": [], "new_picks": []}
 
@@ -546,10 +571,12 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
 def main():
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
-    odds_key = os.environ.get("ODDS_API_KEY")
+    ensure_evolution_sheet(spreadsheet)
 
+    odds_key = os.environ.get("ODDS_API_KEY")
+    graded_count = 0
     if odds_key:
-        auto_grade_pending_bets(sheet, odds_key)
+        graded_count = auto_grade_pending_bets(sheet, odds_key)
 
     update_scoreboard(spreadsheet)
 
@@ -560,10 +587,11 @@ def main():
 
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
-    odds = fetch_wnba_odds(odds_key)
+    update_evolution_log(spreadsheet, "WNBA", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
+    odds = fetch_wnba_odds(odds_key)
     if not odds:
-        print("WARNING: No live WNBA odds returned. Skipping pick generation.")
+        print("WARNING: No live WNBA odds returned. Completed grading and evolution log.")
         return
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
@@ -622,11 +650,7 @@ def main():
         ])
         appended_count += 1
 
-    # Log to Evolution & Learnings Tab
-    val_summary_str = " ; ".join(val_notes) if val_notes else f"Added {appended_count} new pick(s)."
-    update_evolution_log(spreadsheet, "WNBA", updated_memory, val_summary_str, current_time_str)
-
-    print(f"WNBA Execution Complete: {appended_count} new/updated pick(s) added, {skipped_count} duplicate(s) skipped.")
+    print(f"WNBA Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed.")
 
 if __name__ == "__main__":
     main()
