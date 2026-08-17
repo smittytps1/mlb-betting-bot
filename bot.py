@@ -30,7 +30,7 @@ def get_sheets():
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains bold, frozen column headers including Validation."""
+    """Ensures row 1 contains column headers including Validation."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -39,29 +39,23 @@ def ensure_headers(sheet):
             "Status", "P/L ($)", "Reasoning", "Validation"
         ]
 
-        if len(existing_rows) == 0 or (len(existing_rows) > 0 and existing_rows[0][0] != "Date"):
+        if not existing_rows or not existing_rows[0] or existing_rows[0][0] != "Date":
             print("Writing MLB column headers to row 1...")
             sheet.insert_row(headers, index=1)
-            try:
-                sheet.format("A1:N1", {"textFormat": {"bold": True}})
-                sheet.freeze(rows=1)
-            except Exception as e:
-                print(f"Header formatting notice: {e}")
         else:
             if len(existing_rows[0]) < 14 or existing_rows[0][13] != "Validation":
                 sheet.update_cell(1, 14, "Validation")
-                sheet.format("N1", {"textFormat": {"bold": True}})
     except Exception as e:
-        print(f"Notice while checking headers: {e}")
+        print(f"Header formatting notice: {e}")
 
 def ensure_evolution_sheet(spreadsheet):
-    """Guarantees the 'Evolution & Learnings' tab exists with bold headers."""
+    """Safely guarantees the 'Evolution & Learnings' tab exists and has headers."""
     try:
         try:
             evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
         except Exception:
             print("Creating 'Evolution & Learnings' worksheet tab...")
-            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=100, cols=10)
+            evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=200, cols=10)
 
         existing_rows = evo_sheet.get_all_values()
         headers = [
@@ -69,11 +63,11 @@ def ensure_evolution_sheet(spreadsheet):
             "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
         ]
 
-        if len(existing_rows) == 0 or existing_rows[0][0] != "Timestamp":
+        # Safe bounds check to prevent 'list index out of range'
+        if not existing_rows or len(existing_rows) == 0 or len(existing_rows[0]) == 0 or existing_rows[0][0] != "Timestamp":
             print("Writing headers to 'Evolution & Learnings' tab...")
             evo_sheet.insert_row(headers, index=1)
-            evo_sheet.format("A1:H1", {"textFormat": {"bold": True}})
-            evo_sheet.freeze(rows=1)
+
         return evo_sheet
     except Exception as e:
         print(f"Notice while ensuring Evolution sheet: {e}")
@@ -103,9 +97,9 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINE, SPREAD, TOTALS) ---
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets strictly if the game's start time is AFTER the prediction's pulled time."""
+    """Grades PENDING bets (Moneylines, Spreads, and Over/Under Totals)."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -122,7 +116,7 @@ def auto_grade_pending_bets(sheet, odds_key):
             odds_idx = headers.index("Odds")
             units_idx = headers.index("Units")
         except ValueError as e:
-            print(f"Auto-grading skipped: Missing required header column - {e}")
+            print(f"Auto-grading skipped: Missing header - {e}")
             return 0
 
         pending_rows = []
@@ -150,15 +144,11 @@ def auto_grade_pending_bets(sheet, odds_key):
             pick_str = str(r[pick_idx]).strip()
             pulled_time_raw = str(r[pulled_idx]).strip()
             
-            try:
-                odds = float(r[odds_idx])
-            except (ValueError, TypeError):
-                odds = -110.0
+            try: odds = float(r[odds_idx])
+            except (ValueError, TypeError): odds = -110.0
 
-            try:
-                units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
-            except (ValueError, TypeError):
-                units = 1.0
+            try: units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
+            except (ValueError, TypeError): units = 1.0
 
             pulled_dt = None
             try:
@@ -195,7 +185,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                     status = None
                     profit = 0.0
 
-                    # 1. OVER / UNDER TOTALS
                     if "total" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
                         num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
                         if num_match:
@@ -209,7 +198,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                             else:
                                 status = "LOSS"
 
-                    # 2. RUN LINES / SPREADS
                     elif "spread" in bet_type or "run line" in bet_type:
                         num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
                         spread_val = float(num_match.group(0)) if num_match else 0.0
@@ -226,7 +214,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                         else:
                             status = "LOSS"
 
-                    # 3. MONEYLINE
                     else:
                         winner = home_team if home_score > away_score else away_team
                         is_win = (pick_str.lower() in winner.lower() or winner.lower() in pick_str.lower())
@@ -259,7 +246,6 @@ def auto_grade_pending_bets(sheet, odds_key):
 
 # --- 3. SCOREBOARD UPDATER ---
 def update_scoreboard(spreadsheet):
-    """Ensures the 'Scoreboard' tab exists and contains dynamic formulas for both bots."""
     try:
         try:
             sb_sheet = spreadsheet.worksheet("Scoreboard")
@@ -274,10 +260,6 @@ def update_scoreboard(spreadsheet):
         ]
 
         sb_sheet.update(range_name="A1:F4", values=scoreboard_data, value_input_option="USER_ENTERED")
-        sb_sheet.format("A1:F1", {"textFormat": {"bold": True}})
-        sb_sheet.format("E2:E4", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-        sb_sheet.format("F2:F4", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
         print("Scoreboard tab successfully updated with live formulas!")
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
@@ -600,7 +582,7 @@ def main():
 
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
-    # GUARANTEED EVOLUTION LOG AT RUN START
+    # Guaranteed Evolution Log
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
     odds = fetch_mlb_odds(odds_key)
