@@ -63,7 +63,6 @@ def ensure_evolution_sheet(spreadsheet):
             "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"
         ]
 
-        # Safe bounds check to prevent 'list index out of range'
         if not existing_rows or len(existing_rows) == 0 or len(existing_rows[0]) == 0 or existing_rows[0][0] != "Timestamp":
             print("Writing headers to 'Evolution & Learnings' tab...")
             evo_sheet.insert_row(headers, index=1)
@@ -582,7 +581,6 @@ def main():
 
     print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
 
-    # Guaranteed Evolution Log
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
     odds = fetch_mlb_odds(odds_key)
