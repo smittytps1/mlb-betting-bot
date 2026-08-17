@@ -414,7 +414,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI WITH WEIGHTED REASONING SYNTHESIS ---
+# --- 6. GENERATE PICKS VIA GEMINI ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
     print("Sending MLB odds data, multi-factor weights, open picks, and memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -485,166 +485,11 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            chat = client.chats.create(model="gemini-2.5-flash")
-            response = chat.send_message(prompt)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
             
             text = response.text.strip()
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_json)
-
-        except errors.ClientError as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                wait_time = (attempt + 1) * 10
-                print(f"Rate limit (429) hit. Retrying in {wait_time}s (Attempt {attempt + 1}/{max_retries})...")
-                time.sleep(wait_time)
-            else:
-                print(f"Gemini API Error: {e}")
-                break
-        except Exception as e:
-            print(f"Error during pick generation: {e}")
-            break
-
-    return {"validations": [], "new_picks": []}
-
-# --- 7. DEDUPLICATION HELPER ---
-def normalize_string(text):
-    return re.sub(r'[^a-z0-9]', '', str(text).lower())
-
-def extract_sorted_teams(game_str):
-    parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
-    cleaned = [normalize_string(p) for p in parts if p.strip()]
-    return tuple(sorted(cleaned))
-
-def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-    if len(raw_rows) <= 1:
-        return False
-
-    headers = [h.strip() for h in raw_rows[0]]
-    try:
-        date_col = headers.index("Date")
-        game_col = headers.index("Game")
-        bet_type_col = headers.index("Bet Type / Sportsbook")
-        pick_col = headers.index("Pick")
-        odds_col = headers.index("Odds")
-    except ValueError:
-        return False
-
-    norm_teams = extract_sorted_teams(game)
-    norm_bet_type = normalize_string(bet_type)
-    norm_pick = normalize_string(pick)
-    try:
-        norm_odds = int(round(float(odds_val)))
-    except (ValueError, TypeError):
-        norm_odds = 0
-
-    for r in raw_rows[1:]:
-        if len(r) <= max(date_col, game_col, bet_type_col, pick_col, odds_col):
-            continue
-
-        r_date = str(r[date_col]).strip()
-        r_teams = extract_sorted_teams(r[game_col])
-        r_bet_type = normalize_string(r[bet_type_col])
-        r_pick = normalize_string(r[pick_col])
-        
-        try:
-            r_odds = int(round(float(r[odds_col])))
-        except (ValueError, TypeError):
-            r_odds = 0
-
-        if (r_date == pick_date and 
-            r_teams == norm_teams and 
-            r_bet_type == norm_bet_type and 
-            r_pick == norm_pick and 
-            r_odds == norm_odds):
-            return True
-
-    return False
-
-# --- MAIN EXECUTION ---
-def main():
-    spreadsheet, sheet = get_sheets()
-    ensure_headers(sheet)
-    ensure_evolution_sheet(spreadsheet)
-
-    odds_key = os.environ.get("ODDS_API_KEY")
-    graded_count = 0
-    if odds_key:
-        graded_count = auto_grade_pending_bets(sheet, odds_key)
-
-    update_scoreboard(spreadsheet)
-
-    memory = load_memory()
-    updated_memory = update_memory_from_sheet(sheet, memory)
-    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
-
-    print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
-
-    update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
-
-    odds = fetch_mlb_odds(odds_key)
-    if not odds:
-        print("WARNING: No live MLB odds returned. Completed grading and evolution log.")
-        return
-
-    open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks)
-
-    validations = ai_response.get("validations", [])
-    new_picks = ai_response.get("new_picks", [])
-
-    val_notes = []
-    if validations:
-        print(f"Processing {len(validations)} pick validation update(s)...")
-        for val in validations:
-            row_idx = val.get("row_index")
-            action = str(val.get("action", "")).strip().upper()
-            reason = str(val.get("reason", "")).strip()
-            if row_idx and action in ["VALIDATED", "REJECTED"]:
-                sheet.update_cell(row_idx, 14, action)
-                val_notes.append(f"Row {row_idx} ({action}): {reason}")
-                print(f"Row {row_idx} marked as {action}.")
-
-    raw_rows = sheet.get_all_values()
-    appended_count = 0
-    skipped_count = 0
-
-    for p in new_picks:
-        pick_date = str(p.get("date", today_date_str)).strip()
-        game = str(p.get("game", "")).strip()
-        bet_type = str(p.get("bet_type", "")).strip()
-        pick = str(p.get("pick", "")).strip()
-        
-        try:
-            odds_val = float(p.get("odds", -110))
-        except (ValueError, TypeError):
-            odds_val = -110.0
-
-        if is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-            print(f"Skipping duplicate prediction: {game} | {pick} @ {int(round(odds_val))}")
-            skipped_count += 1
-            continue
-
-        sheet.append_row([
-            pick_date,
-            current_time_str,
-            game,
-            bet_type,
-            pick,
-            int(round(odds_val)),
-            p.get("implied_prob", ""),
-            p.get("model_prob", ""),
-            p.get("expected_value", ""),
-            p.get("units", 1.0),
-            "PENDING",
-            0.0,
-            p.get("reasoning", ""),
-            ""
-        ])
-        appended_count += 1
-
-    print(f"MLB Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed.")
-
-if __name__ == "__main__":
-    main()
+            clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("
