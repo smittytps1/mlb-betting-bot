@@ -6,7 +6,6 @@ import requests
 import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import errors
 
@@ -14,16 +13,15 @@ from google.genai import errors
 def get_sheets():
     print("Connecting to Google Sheets (MLB Tab)...")
     scopes = [
-        "[https://www.googleapis.com/auth/spreadsheets](https://www.googleapis.com/auth/spreadsheets)",
-        "[https://www.googleapis.com/auth/drive](https://www.googleapis.com/auth/drive)"
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
     ]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str:
         raise ValueError("GCP_SERVICE_ACCOUNT_JSON environment variable is missing!")
     
     creds_dict = json.loads(service_account_str)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
+    client = gspread.service_account_from_dict(creds_dict, scopes=scopes)
     
     spreadsheet = client.open("MLB AI Betting Tracker")
     sheet = spreadsheet.worksheet("MLB")
@@ -128,7 +126,7 @@ def auto_grade_pending_bets(sheet, odds_key):
             return 0
 
         print(f"Checking results for {len(pending_rows)} pending MLB bet(s)...")
-        scores_url = f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=){odds_key}&daysFrom=3"
+        scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200:
             print(f"Could not fetch MLB score data. Status code: {resp.status_code}")
@@ -379,7 +377,7 @@ def update_memory_from_sheet(sheet, memory):
 
 # --- 5. FETCH MLB ODDS & ACTIVE TODAY PICKS ---
 def fetch_mlb_odds(odds_key):
-    url = f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=){odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
     resp = requests.get(url)
     if resp.status_code == 200:
