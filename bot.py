@@ -357,13 +357,11 @@ def update_memory_from_sheet(sheet, memory):
         losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
         total = wins + losses
 
-        # 1. Reset standard factor counters
         factors = memory.get("reasoning_factor_weights", {})
         for key in factors:
             factors[key]["wins"] = 0
             factors[key]["losses"] = 0
 
-        # 2. Track Column 15 High Agreement metrics directly
         yes_wins, yes_losses, yes_profit = 0, 0, 0.0
         no_wins, no_losses, no_profit = 0, 0, 0.0
 
@@ -388,7 +386,6 @@ def update_memory_from_sheet(sheet, memory):
                 agree_val = str(r[high_agree_idx]).strip().capitalize() if len(r) > high_agree_idx else "No"
 
                 if status in ["WIN", "LOSS"]:
-                    # Audit Column 15 directly
                     if agree_val == "Yes":
                         if status == "WIN":
                             yes_wins += 1
@@ -406,7 +403,6 @@ def update_memory_from_sheet(sheet, memory):
                             no_losses += 1
                             no_profit += pnl_val
 
-                    # Audit reasoning keywords for other factors
                     for factor_key, kws in keywords_map.items():
                         if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for kw in kws):
                             if factor_key not in factors:
@@ -416,13 +412,11 @@ def update_memory_from_sheet(sheet, memory):
                             else:
                                 factors[factor_key]["losses"] += 1
 
-        # 3. Calculate dynamic factor weights
         for factor_key, data in factors.items():
             w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
             data["weight"] = w_val
             data["instruction"] = inst
 
-        # Column 15 specific directive synthesis
         yes_total = yes_wins + yes_losses
         if yes_total >= 3:
             yes_win_rate = round((yes_wins / yes_total) * 100, 1)
@@ -516,7 +510,23 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI 3 GROUNDED WITH MULTI-SOURCE SYNTHESIS ---
+# --- 6. GENERATE PICKS VIA GEMINI ---
+def parse_json_from_response(response):
+    """Robust extractor for JSON responses from GenAI models."""
+    raw_text = ""
+    if hasattr(response, "text") and response.text:
+        raw_text = response.text
+    elif hasattr(response, "candidates") and response.candidates:
+        parts = response.candidates[0].content.parts
+        raw_text = "".join([p.text for p in parts if hasattr(p, "text") and p.text])
+
+    raw_text = raw_text.strip()
+    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    if json_match:
+        return json.loads(json_match.group(0))
+    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+    return json.loads(clean_text)
+
 def generate_picks_and_validations(odds_data, memory, open_picks):
     print("Sending MLB odds data, multi-factor weights, open picks, and analytical frameworks to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -524,7 +534,6 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     prompt = f"""
     You are an adaptive quantitative MLB betting strategist executing deep multi-variable synthesis with recursive self-learning.
-    Use Google Search grounding to verify today's confirmed lineups, starting pitcher announcements, bullpen availability, stadium weather, and projection consensus across major predictive models.
 
     === RECURSIVE MEMORY & EMPIRICAL PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
@@ -626,24 +635,15 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
         "gemini-3.1-pro-preview"
     ]
 
-    search_config = types.GenerateContentConfig(
-        tools=[types.Tool(google_search=types.GoogleSearch())]
-    )
-
     for model_name in candidate_models:
         for attempt in range(2):
             try:
-                print(f"Attempting pick synthesis with model: {model_name} (with Google Search Grounding)...")
+                print(f"Attempting pick synthesis with model: {model_name}...")
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=prompt,
-                    config=search_config
+                    contents=prompt
                 )
-                
-                text = response.text.strip()
-                json_match = re.search(r'\{.*\}', text, re.DOTALL)
-                clean_json = json_match.group(0) if json_match else text.replace("```json", "").replace("```", "").strip()
-                return json.loads(clean_json)
+                return parse_json_from_response(response)
 
             except errors.ClientError as e:
                 if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
