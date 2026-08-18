@@ -7,6 +7,7 @@ import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from google import genai
+from google.genai import types
 from google.genai import errors
 
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
@@ -96,7 +97,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
 
 # --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINES, SPREADS, TOTALS) ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets (Moneylines, Spreads, and Over/Under Totals)."""
+    """Grades PENDING bets accurately with isolated parser logic for Totals, Spreads, and Moneylines."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -182,23 +183,33 @@ def auto_grade_pending_bets(sheet, odds_key):
                     status = None
                     profit = 0.0
 
-                    if "total" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
-                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
+                    pick_lower = pick_str.lower()
+                    is_total_market = ("total" in bet_type or "over" in pick_lower or "under" in pick_lower or "o/u" in pick_lower)
+
+                    # 1. TOTALS
+                    if is_total_market:
+                        num_match = re.search(r'(?:over|under|o/u|u|o)?\s*([0-9]+\.?[0-9]*)', pick_lower)
                         if num_match:
-                            total_line = float(num_match.group(0))
-                            is_over = "over" in bet_type or "over" in pick_str.lower()
+                            total_line = float(num_match.group(1))
+                            is_over = bool(re.search(r'\b(over|o)\b', pick_lower))
+                            is_under = bool(re.search(r'\b(under|u)\b', pick_lower))
+                            if not is_over and not is_under:
+                                is_over = "over" in pick_lower
+
                             if total_score == total_line:
                                 status = "PUSH"
                                 profit = 0.0
-                            elif (is_over and total_score > total_line) or (not is_over and total_score < total_line):
+                            elif (is_over and total_score > total_line) or (is_under and total_score < total_line):
                                 status = "WIN"
                             else:
                                 status = "LOSS"
 
-                    elif "spread" in bet_type or "run line" in bet_type:
-                        num_match = re.search(r'[-+]?\d*\.?\d+', pick_str)
-                        spread_val = float(num_match.group(0)) if num_match else 0.0
-                        is_home_pick = home_team.lower() in pick_str.lower()
+                    # 2. RUN LINES / SPREADS
+                    elif "spread" in bet_type or "run line" in bet_type or re.search(r'[-+]\d+\.?\d*', pick_str):
+                        spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
+                        spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
+                        
+                        is_home_pick = home_team.lower() in pick_lower
                         pick_score = home_score if is_home_pick else away_score
                         opp_score = away_score if is_home_pick else home_score
 
@@ -211,9 +222,10 @@ def auto_grade_pending_bets(sheet, odds_key):
                         else:
                             status = "LOSS"
 
+                    # 3. MONEYLINE
                     else:
                         winner = home_team if home_score > away_score else away_team
-                        is_win = (pick_str.lower() in winner.lower() or winner.lower() in pick_str.lower())
+                        is_win = (pick_lower in winner.lower() or winner.lower() in pick_lower)
                         status = "WIN" if is_win else "LOSS"
 
                     if status == "WIN":
@@ -276,14 +288,36 @@ def load_memory():
         "losses": 0,
         "win_rate": "0%",
         "net_profit_dollars": 0.0,
-        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
+        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation across FanGraphs, Statcast, and Ballpark Pal methodologies.",
         "reasoning_factor_weights": {
-            "starting_pitcher_metrics": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate xFIP, SIERA, CSW%, K-BB%, and handedness splits."},
-            "pitch_mix_arsenal_matchup": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate pitch arsenal RV/100 vs lineup tracking."},
-            "bullpen_usage_and_leverage": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate 3-day pitch usage, leverage tier FIP, and middle relief."},
-            "statcast_offensive_splits": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate wRC+/wOBA vs pitcher hand, Barrel%, Hard-Hit%, and chase rates."},
-            "ballpark_and_weather_physics": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate park factors, wind vector, temperature, and air density."},
-            "defense_umpire_and_rest": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate DRS/OAA, catcher framing, umpire zones, and travel/rest."}
+            "starting_pitcher_expected_metrics": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate FIP, xFIP, SIERA, xERA, K-BB%, CSW%, Stuff+, Location+, and pitch arsenal Run Values (RV/100)."
+            },
+            "bullpen_depth_and_fatigue": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate 1-3 day rolling pitch usage via RosterResource, leverage-tier SIERA, and middle relief vulnerabilities."
+            },
+            "platoon_and_lineup_splits": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate wRC+ and OPS splits vs LHP/RHP, confirmed daily starting lineups, and key rest spots."
+            },
+            "statcast_contact_quality": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate xwOBA, Hard-Hit%, Barrel%, xBA, and xSLG to identify lucky BABIP anomalies vs genuine authority."
+            },
+            "ballpark_and_weather_simulation": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate Ballpark Pal venue simulations, park factors, wind vectors, temperature, air density, humidity, and roof status."
+            },
+            "umpire_and_situational_fatigue": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate home plate umpire strike zone tendencies, day-after-night games, cross-country travel, and getaway days."
+            },
+            "market_consensus_and_sharp_splits": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate TeamRankings computer projections, Covers/BettingPros consensus modeling, and sharp line movement splits."
+            }
         }
     }
     with open("bot_memory.json", "w") as f:
@@ -323,12 +357,13 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0
 
         keywords_map = {
-            "starting_pitcher_metrics": ["xfip", "siera", "csw", "whip", "k/bb", "starter", "strikeout", "handedness"],
-            "pitch_mix_arsenal_matchup": ["arsenal", "pitch mix", "slider", "fastball", "changeup", "curveball", "run value", "rv/100"],
-            "bullpen_usage_and_leverage": ["bullpen", "reliever", "leverage", "closer", "3-day", "fatigue", "rest advantage", "middle relief"],
-            "statcast_offensive_splits": ["wrc+", "woba", "barrel", "hard-hit", "xwoba", "chase", "plate discipline", "platoon", "lineup"],
-            "ballpark_and_weather_physics": ["park factor", "wind", "air density", "humidity", "temperature", "roof", "fly ball"],
-            "defense_umpire_and_rest": ["drs", "oaa", "catcher framing", "umpire", "strike zone", "travel", "night-to-day", "rest"]
+            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "k-bb", "k/bb", "starter", "strikeout", "stuff+", "location+", "pitch arsenal", "rv/100"],
+            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "3-day", "fatigue", "rosterresource", "middle relief", "high-leverage"],
+            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup", "rest day", "handedness", "splits"],
+            "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg", "babip", "savant", "exit velocity"],
+            "ballpark_and_weather_simulation": ["ballpark pal", "park factor", "wind", "air density", "temperature", "humidity", "weather", "altitude", "coors", "roof"],
+            "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"],
+            "market_consensus_and_sharp_splits": ["teamrankings", "covers", "bettingpros", "sharp", "public split", "consensus", "projection", "market move"]
         }
 
         for r in rows[1:]:
@@ -375,7 +410,7 @@ def update_memory_from_sheet(sheet, memory):
 
     return memory
 
-# --- 5. FETCH MLB ODDS & ACTIVE TODAY PICKS ---
+# --- 5. FETCH MLB ODDS & GET TODAY'S OPEN PICKS ---
 def fetch_mlb_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
@@ -407,19 +442,23 @@ def get_today_existing_picks(sheet, today_date_str):
                     "bet_type": r[3] if len(r) > 3 else "",
                     "pick": r[4] if len(r) > 4 else "",
                     "odds": r[5] if len(r) > 5 else "",
+                    "implied_prob": r[6] if len(r) > 6 else "",
+                    "model_prob": r[7] if len(r) > 7 else "",
+                    "expected_value": r[8] if len(r) > 8 else "",
                     "reasoning": r[12] if len(r) > 12 else "",
                     "validation": r[13] if len(r) > 13 else ""
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI ---
+# --- 6. GENERATE PICKS VIA GEMINI 3 GROUNDED WITH LIVE SEARCH ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
-    print("Sending MLB odds data, multi-factor weights, open picks, and memory to Gemini...")
+    print("Sending MLB odds data, multi-factor weights, open picks, and analytical frameworks to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
     You are an adaptive quantitative MLB betting strategist executing deep multi-variable synthesis with recursive self-learning.
+    Use Google Search grounding to verify today's confirmed lineups, starting pitcher announcements, bullpen availability, and stadium weather for the matchups.
 
     === RECURSIVE MEMORY & PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
@@ -431,14 +470,27 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     - High-Weight Factors (>1.2x): Prioritize as primary drivers of true model win probability.
     - Low-Weight Factors (<0.8x): Do NOT discard, but DE-EMPHASIZE. They must not be the sole or primary justification for an EV edge.
 
-    === MULTI-FACTOR BASEBALL SYNTHESIS CRITERIA ===
-    1. STARTING PITCHING: Predictive metrics (xFIP, SIERA, CSW%, K-BB%) over surface ERA; handedness splits; pitch arsenal vs lineup RV/100; velocity deviations.
-    2. BULLPEN USAGE & DEPTH: 3-day rolling pitch counts; leverage-tier FIP vs middle-relief vulnerabilities.
-    3. OFFENSIVE STATCAST SPLITS: wRC+/wOBA vs pitcher hand; Barrel%, Hard-Hit%, and chase rates.
-    4. BALLPARK & WEATHER PHYSICS: Venue park factors; wind vector; temperature, humidity, air density; roof status.
-    5. DEFENSE, UMPIRE & SITUATIONAL SPOTS: DRS/OAA, catcher framing, umpire strike zone tendencies, rest/travel.
+    === QUANTITATIVE RESEARCH METHODOLOGY & ANALYTICAL SOURCES ===
+    1. FANGRAPHS / ADVANCED PITCHING METRICS:
+       - Starting pitching dictates 60-70% of early-game scoring. Look past surface ERA.
+       - Focus heavily on: FIP, xFIP, SIERA, xERA, K-BB% (best baseline command indicator), CSW%, Stuff+/Location+, and pitch mix arsenal Run Values (RV/100).
+    2. ROSTERRESOURCE / BULLPEN FATIGUE & LEVERAGE:
+       - Starters rarely go past 5-6 innings. Track 1-3 day rolling pitch usage and bullpen-taxing extra-inning games.
+       - A taxed bullpen forced to use low-leverage arms often drives late-game scoring spikes.
+    3. PLATOON & LINEUP CHANGES:
+       - Check handedness splits (wRC+ and OPS vs LHP/RHP).
+       - Account for confirmed daily starting 9 changes and key rest spots.
+    4. BASEBALL SAVANT / STATCAST CONTACT QUALITY:
+       - Evaluate xwOBA, Hard-Hit%, Barrel%, xBA, and xSLG to identify lucky BABIP anomalies vs genuine authority.
+    5. BALLPARK PAL / ENVIRONMENTAL PHYSICS:
+       - Incorporate stadium-specific park factors, wind vectors/speed (blowing out to center vs blowing in), temperature (warmer air is less dense = ball travels further), humidity, barometric pressure, altitude (e.g., Coors Field), and roof status.
+    6. UMPIRE & SITUATIONAL SPOTS:
+       - Home plate umpire strike zone tendencies: Generous zones depress scoring; tight zones inflate walks/pitch counts (favoring Overs).
+       - Situational fatigue: Day games immediately following night games, getaway days, and time zone travel.
+    7. TEAMRANKINGS / COVERS / BETTINGPROS SHARP CONSENSUS:
+       - Model computer simulations against live sportsbook market consensus and sharp betting splits.
 
-    === ACTIVE OPEN PICKS PREVIOUSLY LOGGED TODAY ===
+    === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
 
     === TODAY'S LIVE ODDS DATA ===
@@ -447,20 +499,32 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     STRICT SPORTSBOOK CONSTRAINTS:
     - Place bets ONLY on: 1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars.
 
-    RE-SYNTHESIS & VALIDATION INSTRUCTIONS:
-    - If you find compelling evidence opposing an active open pick, combine arguments for BOTH sides to establish one true stance.
-    - If the previous pick remains best, output "action": "VALIDATED".
-    - If opposing synthesis proves superior, mark the old pick as "action": "REJECTED" and output the new superior bet in "new_picks".
-    - Generate up to 5 total high-EV picks for unrepresented matchups.
+    STRICT RE-EVALUATION & SYNTHESIS RULES:
+    1. EVALUATE EXISTING OPEN PICKS:
+       For every pick listed in ACTIVE OPEN PICKS:
+       - If you agree with the current side/pick: 
+         Set "action": "VALIDATED". 
+         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", and "reason".
+         DO NOT create a duplicate entry in "new_picks".
+       - If market movement, pitching change, weather shifts, or deeper analysis proves the OPPOSITE side is now superior:
+         Set "action": "REJECTED" with "reason".
+         Put the NEW opposite pick into "new_picks".
 
-    OUTPUT SCHEMA:
-    Return strictly a valid JSON object:
+    2. NEW MATCHUPS:
+       - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
+       - Never recommend more than 5 total active bets across the entire slate.
+
+    OUTPUT SCHEMA (STRICT JSON ONLY):
     {{
       "validations": [
         {{
-          "row_index": <int>,
+          "row_index": <int matching row_index in open_picks>,
           "action": "VALIDATED" or "REJECTED",
-          "reason": "<multi-factor synthesis justification>"
+          "updated_odds": <int or float, e.g. -110>,
+          "updated_implied_prob": "52.4%",
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+10.7%",
+          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, bullpen fatigue, Statcast splits, and environment>"
         }}
       ],
       "new_picks": [
@@ -480,7 +544,6 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     }}
     """
 
-    # Upgraded to current Gemini 3 production models
     candidate_models = [
         "gemini-3.7-flash",
         "gemini-3.6-flash",
@@ -488,13 +551,18 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
         "gemini-3.1-pro-preview"
     ]
 
+    search_config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())]
+    )
+
     for model_name in candidate_models:
         for attempt in range(2):
             try:
-                print(f"Attempting pick synthesis with model: {model_name}...")
+                print(f"Attempting pick synthesis with model: {model_name} (with Google Search Grounding)...")
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=prompt
+                    contents=prompt,
+                    config=search_config
                 )
                 
                 text = response.text.strip()
@@ -512,12 +580,12 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
                     print(f"Gemini API Error with {model_name}: {e}")
                     break
             except Exception as e:
-                print(f"Error during pick generation: {e}")
+                print(f"Error during pick generation with {model_name}: {e}")
                 break
 
     return {"validations": [], "new_picks": []}
 
-# --- 7. DEDUPLICATION HELPER ---
+# --- 7. GAME-LEVEL DEDUPLICATION HELPER ---
 def normalize_string(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
@@ -526,7 +594,8 @@ def extract_sorted_teams(game_str):
     cleaned = [normalize_string(p) for p in parts if p.strip()]
     return tuple(sorted(cleaned))
 
-def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
+def game_already_pending(raw_rows, pick_date, game):
+    """Checks if there is already an active pending pick for this exact game today."""
     if len(raw_rows) <= 1:
         return False
 
@@ -534,39 +603,21 @@ def is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
     try:
         date_col = headers.index("Date")
         game_col = headers.index("Game")
-        bet_type_col = headers.index("Bet Type / Sportsbook")
-        pick_col = headers.index("Pick")
-        odds_col = headers.index("Odds")
+        status_col = headers.index("Status")
     except ValueError:
         return False
 
     norm_teams = extract_sorted_teams(game)
-    norm_bet_type = normalize_string(bet_type)
-    norm_pick = normalize_string(pick)
-    try:
-        norm_odds = int(round(float(odds_val)))
-    except (ValueError, TypeError):
-        norm_odds = 0
 
     for r in raw_rows[1:]:
-        if len(r) <= max(date_col, game_col, bet_type_col, pick_col, odds_col):
+        if len(r) <= max(date_col, game_col, status_col):
             continue
 
         r_date = str(r[date_col]).strip()
         r_teams = extract_sorted_teams(r[game_col])
-        r_bet_type = normalize_string(r[bet_type_col])
-        r_pick = normalize_string(r[pick_col])
-        
-        try:
-            r_odds = int(round(float(r[odds_col])))
-        except (ValueError, TypeError):
-            r_odds = 0
+        r_status = str(r[status_col]).strip().upper()
 
-        if (r_date == pick_date and 
-            r_teams == norm_teams and 
-            r_bet_type == norm_bet_type and 
-            r_pick == norm_pick and 
-            r_odds == norm_odds):
+        if r_date == pick_date and r_teams == norm_teams and r_status == "PENDING":
             return True
 
     return False
@@ -605,17 +656,35 @@ def main():
     new_picks = ai_response.get("new_picks", [])
 
     val_notes = []
+    
+    # 1. Process Validations & In-Place Updates on Existing Rows
     if validations:
         print(f"Processing {len(validations)} pick validation update(s)...")
         for val in validations:
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
+
             if row_idx and action in ["VALIDATED", "REJECTED"]:
                 sheet.update_cell(row_idx, 14, action)
                 val_notes.append(f"Row {row_idx} ({action}): {reason}")
-                print(f"Row {row_idx} marked as {action}.")
 
+                if action == "VALIDATED":
+                    if "updated_odds" in val and val["updated_odds"]:
+                        sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    if "updated_implied_prob" in val and val["updated_implied_prob"]:
+                        sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
+                    if "updated_model_prob" in val and val["updated_model_prob"]:
+                        sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if "updated_expected_value" in val and val["updated_expected_value"]:
+                        sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    if reason:
+                        sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+
+                print(f"Row {row_idx} evaluated as {action}.")
+
+    # 2. Append Only Genuinely New / Replacement Picks
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
@@ -631,8 +700,8 @@ def main():
         except (ValueError, TypeError):
             odds_val = -110.0
 
-        if is_duplicate_pick(raw_rows, pick_date, game, bet_type, pick, odds_val):
-            print(f"Skipping duplicate prediction: {game} | {pick} @ {int(round(odds_val))}")
+        if game_already_pending(raw_rows, pick_date, game):
+            print(f"Skipping duplicate game prediction: {game} | {pick}")
             skipped_count += 1
             continue
 
@@ -650,7 +719,7 @@ def main():
             "PENDING",
             0.0,
             p.get("reasoning", ""),
-            ""
+            "NEW"
         ])
         appended_count += 1
 
