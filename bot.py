@@ -7,7 +7,6 @@ import gspread
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from google import genai
-from google.genai import types
 from google.genai import errors
 
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
@@ -35,7 +34,7 @@ def ensure_headers(sheet):
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
-            "Status", "P/L ($)", "Reasoning", "Validation", "High Agreement (Yes/No)"
+            "Status", "P/L ($)", "Reasoning", "Validation", "High Agreement & Source Breakdown"
         ]
 
         if not existing_rows or not existing_rows[0] or existing_rows[0][0] != "Date":
@@ -45,8 +44,8 @@ def ensure_headers(sheet):
             current_row_len = len(existing_rows[0])
             if current_row_len < 14 or existing_rows[0][13] != "Validation":
                 sheet.update_cell(1, 14, "Validation")
-            if current_row_len < 15 or (current_row_len >= 15 and existing_rows[0][14] != "High Agreement (Yes/No)"):
-                sheet.update_cell(1, 15, "High Agreement (Yes/No)")
+            if current_row_len < 15 or (current_row_len >= 15 and "High Agreement" not in existing_rows[0][14]):
+                sheet.update_cell(1, 15, "High Agreement & Source Breakdown")
     except Exception as e:
         print(f"Header formatting notice: {e}")
 
@@ -276,7 +275,7 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-# --- 4. RECURSIVE MEMORY & FACTOR WEIGHTING (INCLUDING COLUMN 15 AUDITING) ---
+# --- 4. RECURSIVE MEMORY & FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -351,7 +350,11 @@ def update_memory_from_sheet(sheet, memory):
         status_idx = headers.index("Status") if "Status" in headers else 10
         pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
         reason_idx = headers.index("Reasoning") if "Reasoning" in headers else 12
-        high_agree_idx = headers.index("High Agreement (Yes/No)") if "High Agreement (Yes/No)" in headers else 14
+        high_agree_idx = 14
+        for idx_h, h_name in enumerate(headers):
+            if "High Agreement" in h_name:
+                high_agree_idx = idx_h
+                break
 
         wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
         losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
@@ -372,7 +375,7 @@ def update_memory_from_sheet(sheet, memory):
             "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg", "babip", "savant", "exit velocity"],
             "ballpark_and_weather_simulation": ["ballpark pal", "park factor", "wind", "air density", "temperature", "humidity", "weather", "altitude", "coors", "roof"],
             "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"],
-            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs projection", "model agreement", "split projection", "divergence", "sharp split", "high agreement"]
+            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs", "ballpark pal", "model agreement", "split projection", "divergence", "sharp split", "high agreement"]
         }
 
         for r in rows[1:]:
@@ -383,10 +386,11 @@ def update_memory_from_sheet(sheet, memory):
                 try: pnl_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
                 except (ValueError, TypeError): pnl_val = 0.0
 
-                agree_val = str(r[high_agree_idx]).strip().capitalize() if len(r) > high_agree_idx else "No"
+                agree_cell = str(r[high_agree_idx]).strip() if len(r) > high_agree_idx else "No"
+                is_yes = agree_cell.lower().startswith("yes")
 
                 if status in ["WIN", "LOSS"]:
-                    if agree_val == "Yes":
+                    if is_yes:
                         if status == "WIN":
                             yes_wins += 1
                             yes_profit += pnl_val
@@ -552,24 +556,23 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     === QUANTITATIVE RESEARCH METHODOLOGY & ANALYTICAL SOURCES ===
     1. FANGRAPHS / ADVANCED PITCHING METRICS:
        - Starting pitching dictates 60-70% of early-game scoring. Look past surface ERA.
-       - Focus heavily on: FIP, xFIP, SIERA, xERA, K-BB% (best baseline command indicator), CSW%, Stuff+/Location+, and pitch mix arsenal Run Values (RV/100).
+       - Focus heavily on: FIP, xFIP, SIERA, xERA, K-BB%, CSW%, Stuff+/Location+, and pitch mix arsenal Run Values (RV/100).
     2. ROSTERRESOURCE / BULLPEN FATIGUE & LEVERAGE:
-       - Starters rarely go past 5-6 innings. Track 1-3 day rolling pitch usage and bullpen-taxing extra-inning games.
+       - Track 1-3 day rolling pitch usage and bullpen-taxing extra-inning games.
        - A taxed bullpen forced to use low-leverage arms often drives late-game scoring spikes.
     3. PLATOON & LINEUP CHANGES:
-       - Check handedness splits (wRC+ and OPS vs LHP/RHP).
-       - Account for confirmed daily starting 9 changes and key rest spots.
+       - Handedness splits (wRC+ and OPS vs LHP/RHP) and confirmed daily starting 9 changes.
     4. BASEBALL SAVANT / STATCAST CONTACT QUALITY:
-       - Evaluate xwOBA, Hard-Hit%, Barrel%, xBA, and xSLG to identify lucky BABIP anomalies vs genuine authority.
+       - xwOBA, Hard-Hit%, Barrel%, xBA, and xSLG to identify BABIP anomalies vs genuine authority.
     5. BALLPARK PAL / ENVIRONMENTAL PHYSICS:
-       - Incorporate stadium-specific park factors, wind vectors/speed (blowing out to center vs blowing in), temperature (warmer air is less dense = ball travels further), humidity, barometric pressure, altitude (e.g., Coors Field), and roof status.
+       - Stadium park factors, wind vectors/speed, temperature, air density, humidity, altitude, roof status.
     6. UMPIRE & SITUATIONAL SPOTS:
-       - Home plate umpire strike zone tendencies: Generous zones depress scoring; tight zones inflate walks/pitch counts (favoring Overs).
-       - Situational fatigue: Day games immediately following night games, getaway days, and time zone travel.
+       - Umpire strike zone tendencies, day-after-night games, cross-country travel, getaway days.
     7. MULTI-SOURCE CONSENSUS & DIVERGENCE SYNTHESIS:
-       - Cross-reference daily computer projections and consensus picks from FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
-       - HIGH AGREEMENT ("Yes"): Unanimous or strong agreement across computer simulation models and sharp money on this side.
-       - SPLIT/CONFLICTED ("No"): Models diverge or disagree on the projected winner/total.
+       - Cross-reference projections and consensus from: FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
+       - IN COLUMN 15 OUTPUT: Provide a detailed, specific string identifying which sites agree and their projected values.
+         * Example if high agreement: "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: PHI 64%, Covers: Sharp ML)"
+         * Example if split/divergent: "No (Split: FanGraphs on NYY 52% vs BallparkPal on BAL 54%)"
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -585,7 +588,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", "high_agreement": "Yes" or "No", and "reason".
+         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and "reason".
          DO NOT create a duplicate entry in "new_picks".
        - If market movement, pitching change, weather shifts, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
@@ -593,7 +596,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     2. NEW MATCHUPS:
        - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
-       - Indicate "high_agreement": "Yes" if predictive models unanimously agree on this side, or "No" if mixed/split.
+       - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs 61%, BallparkPal 5.4-3.1, TeamRankings 63%)").
        - Never recommend more than 5 total active bets across the entire slate.
 
     OUTPUT SCHEMA (STRICT JSON ONLY):
@@ -606,7 +609,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
           "updated_implied_prob": "52.4%",
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
-          "high_agreement": "Yes" or "No",
+          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "reason": "<multi-factor reasoning citing starter xFIP/SIERA, bullpen fatigue, Statcast splits, environment, and consensus alignment>"
         }}
       ],
@@ -620,7 +623,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
           "implied_prob": "52.4%",
           "model_prob": "58.0%",
           "expected_value": "+10.7%",
-          "high_agreement": "Yes" or "No",
+          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "units": 1.0,
           "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, bullpen rest, Statcast splits, environment, and consensus alignment>"
         }}
@@ -754,7 +757,7 @@ def main():
                     if "updated_expected_value" in val and val["updated_expected_value"]:
                         sheet.update_cell(row_idx, 9, val["updated_expected_value"])
                     if "high_agreement" in val and val["high_agreement"]:
-                        sheet.update_cell(row_idx, 15, str(val["high_agreement"]).capitalize())
+                        sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
                     if reason:
                         sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
@@ -771,7 +774,7 @@ def main():
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
-        high_agree = str(p.get("high_agreement", "No")).strip().capitalize()
+        high_agree_detail = str(p.get("high_agreement", "No (Split consensus)"))
         
         try:
             odds_val = float(p.get("odds", -110))
@@ -798,7 +801,7 @@ def main():
             0.0,
             p.get("reasoning", ""),
             "NEW",
-            high_agree
+            high_agree_detail
         ])
         appended_count += 1
 
