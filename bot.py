@@ -29,21 +29,24 @@ def get_sheets():
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains column headers including Validation."""
+    """Ensures row 1 contains all 15 column headers including High Agreement and Validation."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", 
-            "Status", "P/L ($)", "Reasoning", "Validation"
+            "Status", "P/L ($)", "Reasoning", "Validation", "High Agreement (Yes/No)"
         ]
 
         if not existing_rows or not existing_rows[0] or existing_rows[0][0] != "Date":
             print("Writing MLB column headers to row 1...")
             sheet.insert_row(headers, index=1)
         else:
-            if len(existing_rows[0]) < 14 or existing_rows[0][13] != "Validation":
+            current_row_len = len(existing_rows[0])
+            if current_row_len < 14 or existing_rows[0][13] != "Validation":
                 sheet.update_cell(1, 14, "Validation")
+            if current_row_len < 15 or (current_row_len >= 15 and existing_rows[0][14] != "High Agreement (Yes/No)"):
+                sheet.update_cell(1, 15, "High Agreement (Yes/No)")
     except Exception as e:
         print(f"Header formatting notice: {e}")
 
@@ -72,7 +75,7 @@ def ensure_evolution_sheet(spreadsheet):
         return None
 
 def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, current_time_str):
-    """Logs a live snapshot of the bot's learning, factor weights, and strategy evolution."""
+    """Logs a live snapshot of factor weights, learning reflections, and adjustments."""
     try:
         evo_sheet = ensure_evolution_sheet(spreadsheet)
         if not evo_sheet:
@@ -95,9 +98,9 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ACCURATE AUTO-GRADING VIA SCORES API (MONEYLINES, SPREADS, TOTALS) ---
+# --- 2. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets accurately with isolated parser logic for Totals, Spreads, and Moneylines."""
+    """Grades PENDING bets accurately using dynamic header indexing."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -273,7 +276,7 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-# --- 4. RECURSIVE MEMORY & FACTOR WEIGHTING ---
+# --- 4. RECURSIVE MEMORY & FACTOR WEIGHTING (INCLUDING COLUMN 15 AUDITING) ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -288,7 +291,9 @@ def load_memory():
         "losses": 0,
         "win_rate": "0%",
         "net_profit_dollars": 0.0,
-        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation across FanGraphs, Statcast, and Ballpark Pal methodologies.",
+        "high_agreement_yes_performance": {"wins": 0, "losses": 0, "win_rate": "0%", "profit": 0.0},
+        "high_agreement_no_performance": {"wins": 0, "losses": 0, "win_rate": "0%", "profit": 0.0},
+        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation across FanGraphs, Statcast, Ballpark Pal, and multi-model consensus synthesis.",
         "reasoning_factor_weights": {
             "starting_pitcher_expected_metrics": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
@@ -314,9 +319,9 @@ def load_memory():
                 "wins": 0, "losses": 0, "weight": 1.0, 
                 "instruction": "Evaluate home plate umpire strike zone tendencies, day-after-night games, cross-country travel, and getaway days."
             },
-            "market_consensus_and_sharp_splits": {
+            "multi_source_consensus_and_divergence": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
-                "instruction": "Evaluate TeamRankings computer projections, Covers/BettingPros consensus modeling, and sharp line movement splits."
+                "instruction": "Evaluate multi-model alignment across FanGraphs, Ballpark Pal, TeamRankings, Covers, and sharp money splits."
             }
         }
     }
@@ -346,15 +351,21 @@ def update_memory_from_sheet(sheet, memory):
         status_idx = headers.index("Status") if "Status" in headers else 10
         pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
         reason_idx = headers.index("Reasoning") if "Reasoning" in headers else 12
+        high_agree_idx = headers.index("High Agreement (Yes/No)") if "High Agreement (Yes/No)" in headers else 14
 
         wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
         losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
         total = wins + losses
 
+        # 1. Reset standard factor counters
         factors = memory.get("reasoning_factor_weights", {})
         for key in factors:
             factors[key]["wins"] = 0
             factors[key]["losses"] = 0
+
+        # 2. Track Column 15 High Agreement metrics directly
+        yes_wins, yes_losses, yes_profit = 0, 0, 0.0
+        no_wins, no_losses, no_profit = 0, 0, 0.0
 
         keywords_map = {
             "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "k-bb", "k/bb", "starter", "strikeout", "stuff+", "location+", "pitch arsenal", "rv/100"],
@@ -363,16 +374,41 @@ def update_memory_from_sheet(sheet, memory):
             "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg", "babip", "savant", "exit velocity"],
             "ballpark_and_weather_simulation": ["ballpark pal", "park factor", "wind", "air density", "temperature", "humidity", "weather", "altitude", "coors", "roof"],
             "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"],
-            "market_consensus_and_sharp_splits": ["teamrankings", "covers", "bettingpros", "sharp", "public split", "consensus", "projection", "market move"]
+            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs projection", "model agreement", "split projection", "divergence", "sharp split", "high agreement"]
         }
 
         for r in rows[1:]:
             if len(r) > max(status_idx, reason_idx):
                 status = str(r[status_idx]).strip().upper()
                 reasoning = str(r[reason_idx]).lower()
+                
+                try: pnl_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
+                except (ValueError, TypeError): pnl_val = 0.0
+
+                agree_val = str(r[high_agree_idx]).strip().capitalize() if len(r) > high_agree_idx else "No"
+
                 if status in ["WIN", "LOSS"]:
+                    # Audit Column 15 directly
+                    if agree_val == "Yes":
+                        if status == "WIN":
+                            yes_wins += 1
+                            yes_profit += pnl_val
+                            factors["multi_source_consensus_and_divergence"]["wins"] += 1
+                        else:
+                            yes_losses += 1
+                            yes_profit += pnl_val
+                            factors["multi_source_consensus_and_divergence"]["losses"] += 1
+                    else:
+                        if status == "WIN":
+                            no_wins += 1
+                            no_profit += pnl_val
+                        else:
+                            no_losses += 1
+                            no_profit += pnl_val
+
+                    # Audit reasoning keywords for other factors
                     for factor_key, kws in keywords_map.items():
-                        if any(kw in reasoning for kw in kws):
+                        if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for kw in kws):
                             if factor_key not in factors:
                                 factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
                             if status == "WIN":
@@ -380,12 +416,41 @@ def update_memory_from_sheet(sheet, memory):
                             else:
                                 factors[factor_key]["losses"] += 1
 
+        # 3. Calculate dynamic factor weights
         for factor_key, data in factors.items():
             w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
             data["weight"] = w_val
             data["instruction"] = inst
 
+        # Column 15 specific directive synthesis
+        yes_total = yes_wins + yes_losses
+        if yes_total >= 3:
+            yes_win_rate = round((yes_wins / yes_total) * 100, 1)
+            if yes_win_rate >= 60.0:
+                factors["multi_source_consensus_and_divergence"]["instruction"] = (
+                    f"EMPIRICAL LESSON: High Agreement ('Yes') bets have a {yes_win_rate}% win rate (+${round(yes_profit, 2)}). "
+                    f"Prioritize High Agreement plays as strong model conviction multipliers."
+                )
+            elif yes_win_rate <= 40.0:
+                factors["multi_source_consensus_and_divergence"]["instruction"] = (
+                    f"EMPIRICAL LESSON: High Agreement ('Yes') bets are hitting only {yes_win_rate}% (${round(yes_profit, 2)}). "
+                    f"Consensus is proving overvalued. De-emphasize consensus and look for sharp divergence/contrarian edges."
+                )
+
         memory["reasoning_factor_weights"] = factors
+        memory["high_agreement_yes_performance"] = {
+            "wins": yes_wins,
+            "losses": yes_losses,
+            "win_rate": f"{round((yes_wins / yes_total)*100, 1)}%" if yes_total > 0 else "0%",
+            "profit": round(yes_profit, 2)
+        }
+        no_total = no_wins + no_losses
+        memory["high_agreement_no_performance"] = {
+            "wins": no_wins,
+            "losses": no_losses,
+            "win_rate": f"{round((no_wins / no_total)*100, 1)}%" if no_total > 0 else "0%",
+            "profit": round(no_profit, 2)
+        }
 
         if total > 0:
             win_rate = round((wins / total) * 100, 1)
@@ -398,7 +463,7 @@ def update_memory_from_sheet(sheet, memory):
             memory["net_profit_dollars"] = round(net_pl, 2)
 
             if win_rate < 50.0:
-                memory["learnings_and_adjustments"] = f"Win rate is {win_rate}% (<50%). Raising EV threshold to +10% and de-emphasizing low-weight factors."
+                memory["learnings_and_adjustments"] = f"Win rate is {win_rate}% (<50%). Raising EV threshold to +10% and prioritizing high-weight factors."
             else:
                 memory["learnings_and_adjustments"] = f"Win rate is {win_rate}% (profitable). Maintain current quantitative multi-factor selection criteria."
 
@@ -446,11 +511,12 @@ def get_today_existing_picks(sheet, today_date_str):
                     "model_prob": r[7] if len(r) > 7 else "",
                     "expected_value": r[8] if len(r) > 8 else "",
                     "reasoning": r[12] if len(r) > 12 else "",
-                    "validation": r[13] if len(r) > 13 else ""
+                    "validation": r[13] if len(r) > 13 else "",
+                    "high_agreement": r[14] if len(r) > 14 else "No"
                 })
     return existing
 
-# --- 6. GENERATE PICKS VIA GEMINI 3 GROUNDED WITH LIVE SEARCH ---
+# --- 6. GENERATE PICKS VIA GEMINI 3 GROUNDED WITH MULTI-SOURCE SYNTHESIS ---
 def generate_picks_and_validations(odds_data, memory, open_picks):
     print("Sending MLB odds data, multi-factor weights, open picks, and analytical frameworks to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -458,13 +524,17 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
 
     prompt = f"""
     You are an adaptive quantitative MLB betting strategist executing deep multi-variable synthesis with recursive self-learning.
-    Use Google Search grounding to verify today's confirmed lineups, starting pitcher announcements, bullpen availability, and stadium weather for the matchups.
+    Use Google Search grounding to verify today's confirmed lineups, starting pitcher announcements, bullpen availability, stadium weather, and projection consensus across major predictive models.
 
-    === RECURSIVE MEMORY & PERFORMANCE REFLECTION ===
+    === RECURSIVE MEMORY & EMPIRICAL PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
 
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
+
+    === COLUMN 15 HIGH AGREEMENT AUDIT RESULTS ===
+    - High Agreement ('Yes') Historical Record: {json.dumps(memory.get("high_agreement_yes_performance", {}))}
+    - Low/Split Agreement ('No') Historical Record: {json.dumps(memory.get("high_agreement_no_performance", {}))}
 
     WEIGHTING DIRECTIVES:
     - High-Weight Factors (>1.2x): Prioritize as primary drivers of true model win probability.
@@ -487,8 +557,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
     6. UMPIRE & SITUATIONAL SPOTS:
        - Home plate umpire strike zone tendencies: Generous zones depress scoring; tight zones inflate walks/pitch counts (favoring Overs).
        - Situational fatigue: Day games immediately following night games, getaway days, and time zone travel.
-    7. TEAMRANKINGS / COVERS / BETTINGPROS SHARP CONSENSUS:
-       - Model computer simulations against live sportsbook market consensus and sharp betting splits.
+    7. MULTI-SOURCE CONSENSUS & DIVERGENCE SYNTHESIS:
+       - Cross-reference daily computer projections and consensus picks from FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
+       - HIGH AGREEMENT ("Yes"): Unanimous or strong agreement across computer simulation models and sharp money on this side.
+       - SPLIT/CONFLICTED ("No"): Models diverge or disagree on the projected winner/total.
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -504,14 +576,15 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", and "reason".
+         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", "high_agreement": "Yes" or "No", and "reason".
          DO NOT create a duplicate entry in "new_picks".
-       - If market movement, pitching change, weather shifts, or deeper analysis proves the OPPOSITE side is now superior:
+       - If market movement, pitching change, weather shifts, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
          Put the NEW opposite pick into "new_picks".
 
     2. NEW MATCHUPS:
        - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
+       - Indicate "high_agreement": "Yes" if predictive models unanimously agree on this side, or "No" if mixed/split.
        - Never recommend more than 5 total active bets across the entire slate.
 
     OUTPUT SCHEMA (STRICT JSON ONLY):
@@ -524,7 +597,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
           "updated_implied_prob": "52.4%",
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
-          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, bullpen fatigue, Statcast splits, and environment>"
+          "high_agreement": "Yes" or "No",
+          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, bullpen fatigue, Statcast splits, environment, and consensus alignment>"
         }}
       ],
       "new_picks": [
@@ -537,8 +611,9 @@ def generate_picks_and_validations(odds_data, memory, open_picks):
           "implied_prob": "52.4%",
           "model_prob": "58.0%",
           "expected_value": "+10.7%",
+          "high_agreement": "Yes" or "No",
           "units": 1.0,
-          "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, bullpen rest, Statcast splits, and environment>"
+          "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, bullpen rest, Statcast splits, environment, and consensus alignment>"
         }}
       ]
     }}
@@ -678,6 +753,8 @@ def main():
                         sheet.update_cell(row_idx, 8, val["updated_model_prob"])
                     if "updated_expected_value" in val and val["updated_expected_value"]:
                         sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    if "high_agreement" in val and val["high_agreement"]:
+                        sheet.update_cell(row_idx, 15, str(val["high_agreement"]).capitalize())
                     if reason:
                         sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
@@ -694,6 +771,7 @@ def main():
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
+        high_agree = str(p.get("high_agreement", "No")).strip().capitalize()
         
         try:
             odds_val = float(p.get("odds", -110))
@@ -719,7 +797,8 @@ def main():
             "PENDING",
             0.0,
             p.get("reasoning", ""),
-            "NEW"
+            "NEW",
+            high_agree
         ])
         appended_count += 1
 
