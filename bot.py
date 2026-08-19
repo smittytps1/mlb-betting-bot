@@ -146,60 +146,90 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. OFFICIAL MLB STATS API: TODAY'S PROBABLE PITCHERS ---
+# --- 2. ESPN & MLB STATS API: DIRECT PROBABLE PITCHER INGESTION ---
 def fetch_today_probable_pitchers(target_date_str):
-    """Fetches confirmed starting pitchers and their season stat baselines directly from MLB Stats API."""
-    print(f"Fetching confirmed starting pitchers for {target_date_str} from MLB Stats API...")
+    """Fetches verified starting pitchers from ESPN's open site API with MLB Stats API fallback."""
+    print(f"Fetching confirmed starting pitchers for {target_date_str} from ESPN / MLB feeds...")
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(stats)"
-
+    
+    # 1. Primary Ingestion: ESPN MLB Scoreboard API
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            dates = data.get("dates", [])
+        date_clean = target_date_str.replace("-", "")
+        espn_url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={date_clean}"
+        espn_resp = requests.get(espn_url, headers=headers, timeout=10)
+        
+        if espn_resp.status_code == 200:
+            espn_data = espn_resp.json()
+            events = espn_data.get("events", [])
+            print(f"  [ESPN Feed] Ingesting {len(events)} matchup cards...")
+
+            for event in events:
+                comps = event.get("competitions", [])
+                if not comps:
+                    continue
+                
+                competitors = comps[0].get("competitors", [])
+                probables = comps[0].get("probables", [])
+
+                # Map probables if defined in competition object
+                for p in probables:
+                    p_name = p.get("athlete", {}).get("displayName", "TBD")
+                    p_hand = p.get("athlete", {}).get("hand", {}).get("type", "Right")
+                    hand_code = "LHP" if "left" in p_hand.lower() else "RHP"
+                    
+                    team_id = p.get("team", {}).get("id")
+                    for c in competitors:
+                        if c.get("id") == team_id or c.get("team", {}).get("id") == team_id:
+                            raw_name = c.get("team", {}).get("displayName", "")
+                            canonical = match_canonical_team(raw_name)
+                            if canonical:
+                                stats_summary = p.get("statistics", [])
+                                stat_str = ", ".join([f"{s.get('name')}: {s.get('displayValue')}" for s in stats_summary]) if stats_summary else "Active Starter"
+                                pitcher_map[canonical] = f"{p_name} ({hand_code} | {stat_str})"
+
+                # Direct competitor fallback
+                for c in competitors:
+                    raw_name = c.get("team", {}).get("displayName", "")
+                    canonical = match_canonical_team(raw_name)
+                    if canonical and canonical not in pitcher_map:
+                        prob = c.get("probables", [])
+                        if prob:
+                            ath = prob[0].get("athlete", {})
+                            p_name = ath.get("displayName", "TBD")
+                            p_hand = ath.get("hand", {}).get("type", "Right")
+                            hand_code = "LHP" if "left" in p_hand.lower() else "RHP"
+                            pitcher_map[canonical] = f"{p_name} ({hand_code})"
+    except Exception as e:
+        print(f"Notice during ESPN probables fetch: {e}")
+
+    # 2. Secondary Fallback: MLB Stats API
+    try:
+        mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
+        mlb_resp = requests.get(mlb_url, headers=headers, timeout=10)
+        
+        if mlb_resp.status_code == 200:
+            mlb_data = mlb_resp.json()
+            dates = mlb_data.get("dates", [])
             if dates:
                 for game in dates[0].get("games", []):
                     teams = game.get("teams", {})
                     for side in ["away", "home"]:
                         team_data = teams.get(side, {})
                         raw_team = team_data.get("team", {}).get("name", "")
-                        canonical_team = match_canonical_team(raw_team)
+                        canonical = match_canonical_team(raw_team)
                         
-                        pitcher_info = team_data.get("probablePitcher", {})
-                        if pitcher_info:
-                            p_name = pitcher_info.get("fullName", "TBD")
-                            p_hand = pitcher_info.get("pitchHand", {}).get("code", "R") + "HP"
-                            
-                            stats_list = pitcher_info.get("stats", [])
-                            era = "N/A"
-                            w_l = "0-0"
-                            so = 0
-                            bb = 0
-                            ip = "0.0"
-                            whip = "N/A"
-                            
-                            if stats_list:
-                                splits = stats_list[0].get("splits", [])
-                                if splits:
-                                    stat_dict = splits[0].get("stat", {})
-                                    era = stat_dict.get("era", "N/A")
-                                    w_l = f"{stat_dict.get('wins', 0)}-{stat_dict.get('losses', 0)}"
-                                    so = stat_dict.get("strikeOuts", 0)
-                                    bb = stat_dict.get("baseOnBalls", 0)
-                                    ip = stat_dict.get("inningsPitched", "0.0")
-                                    whip = stat_dict.get("whip", "N/A")
-
-                            pitcher_summary = f"{p_name} ({p_hand}, W-L: {w_l}, ERA: {era}, WHIP: {whip}, {so} SO, {bb} BB in {ip} IP)"
-                            pitcher_map[canonical_team] = pitcher_summary
-                        else:
-                            pitcher_map[canonical_team] = "Starter TBD / Bullpen Day"
+                        if canonical and (canonical not in pitcher_map or "TBD" in pitcher_map[canonical]):
+                            pitcher_info = team_data.get("probablePitcher", {})
+                            if pitcher_info:
+                                p_name = pitcher_info.get("fullName", "TBD")
+                                p_hand = pitcher_info.get("pitchHand", {}).get("code", "R") + "HP"
+                                pitcher_map[canonical] = f"{p_name} ({p_hand})"
     except Exception as e:
-        print(f"Notice fetching probable pitchers: {e}")
+        print(f"Notice during MLB stats fallback: {e}")
 
     for t_name, p_sum in pitcher_map.items():
-        print(f"  [Probable Pitcher] {t_name}: {p_sum}")
+        print(f"  [Verified Starter] {t_name}: {p_sum}")
 
     return pitcher_map
 
@@ -226,8 +256,6 @@ def fetch_recent_bullpen_usage(days_back=2):
                 continue
 
             games = dates[0].get("games", [])
-            print(f"Found {len(games)} game(s) on {target_date}. Parsing pitch logs...")
-
             for game in games:
                 status = game.get("status", {}).get("abstractGameState")
                 game_pk = game.get("gamePk")
@@ -277,7 +305,6 @@ def fetch_recent_bullpen_usage(days_back=2):
                     else:
                         entry_summary = f"Played {target_date} vs {opp_canonical}: Starter threw complete game (0 relievers used)"
                         bullpen_logs[canonical_name].append(entry_summary)
-
         except Exception as e:
             print(f"Notice fetching MLB schedule for {target_date}: {e}")
 
@@ -740,7 +767,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
-    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL MLB STATS API) ===
+    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL ESPN & MLB FEEDS) ===
     {json.dumps(probable_pitchers, indent=2)}
 
     === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
@@ -905,7 +932,7 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
-    # 1. Fetch Confirmed Probable Pitchers directly from Official MLB API
+    # 1. Fetch Confirmed Probable Pitchers directly from ESPN & MLB Feeds
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
 
     # 2. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
