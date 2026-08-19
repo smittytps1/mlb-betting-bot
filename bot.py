@@ -146,7 +146,64 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. OFFICIAL MLB STATS API: DIRECT BOX SCORE INGESTION ---
+# --- 2. OFFICIAL MLB STATS API: TODAY'S PROBABLE PITCHERS ---
+def fetch_today_probable_pitchers(target_date_str):
+    """Fetches confirmed starting pitchers and their season stat baselines directly from MLB Stats API."""
+    print(f"Fetching confirmed starting pitchers for {target_date_str} from MLB Stats API...")
+    pitcher_map = {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(stats)"
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            dates = data.get("dates", [])
+            if dates:
+                for game in dates[0].get("games", []):
+                    teams = game.get("teams", {})
+                    for side in ["away", "home"]:
+                        team_data = teams.get(side, {})
+                        raw_team = team_data.get("team", {}).get("name", "")
+                        canonical_team = match_canonical_team(raw_team)
+                        
+                        pitcher_info = team_data.get("probablePitcher", {})
+                        if pitcher_info:
+                            p_name = pitcher_info.get("fullName", "TBD")
+                            p_hand = pitcher_info.get("pitchHand", {}).get("code", "R") + "HP"
+                            
+                            stats_list = pitcher_info.get("stats", [])
+                            era = "N/A"
+                            w_l = "0-0"
+                            so = 0
+                            bb = 0
+                            ip = "0.0"
+                            whip = "N/A"
+                            
+                            if stats_list:
+                                splits = stats_list[0].get("splits", [])
+                                if splits:
+                                    stat_dict = splits[0].get("stat", {})
+                                    era = stat_dict.get("era", "N/A")
+                                    w_l = f"{stat_dict.get('wins', 0)}-{stat_dict.get('losses', 0)}"
+                                    so = stat_dict.get("strikeOuts", 0)
+                                    bb = stat_dict.get("baseOnBalls", 0)
+                                    ip = stat_dict.get("inningsPitched", "0.0")
+                                    whip = stat_dict.get("whip", "N/A")
+
+                            pitcher_summary = f"{p_name} ({p_hand}, W-L: {w_l}, ERA: {era}, WHIP: {whip}, {so} SO, {bb} BB in {ip} IP)"
+                            pitcher_map[canonical_team] = pitcher_summary
+                        else:
+                            pitcher_map[canonical_team] = "Starter TBD / Bullpen Day"
+    except Exception as e:
+        print(f"Notice fetching probable pitchers: {e}")
+
+    for t_name, p_sum in pitcher_map.items():
+        print(f"  [Probable Pitcher] {t_name}: {p_sum}")
+
+    return pitcher_map
+
+# --- 3. OFFICIAL MLB STATS API: DIRECT BOX SCORE INGESTION ---
 def fetch_recent_bullpen_usage(days_back=2):
     """Fetches verified reliever pitch counts and box scores from MLB's official Stats API."""
     print(f"Fetching official MLB box scores & bullpen logs for last {days_back} day(s)...")
@@ -224,13 +281,9 @@ def fetch_recent_bullpen_usage(days_back=2):
         except Exception as e:
             print(f"Notice fetching MLB schedule for {target_date}: {e}")
 
-    for t_name, logs in bullpen_logs.items():
-        print(f"  [MLB Stats API] {t_name}: {' | '.join(logs)}")
-
-    print(f"Successfully loaded verified bullpen logs for {len(bullpen_logs)} teams.")
     return bullpen_logs
 
-# --- 3. ACCURATE AUTO-GRADING VIA SCORES API ---
+# --- 4. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
     """Grades PENDING bets accurately using dynamic header indexing."""
     try:
@@ -397,7 +450,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         print(f"Auto-grading completed with notice: {e}")
     return 0
 
-# --- 4. SCOREBOARD UPDATER ---
+# --- 5. SCOREBOARD UPDATER ---
 def update_scoreboard(spreadsheet):
     try:
         try:
@@ -417,7 +470,7 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Notice while updating Scoreboard: {e}")
 
-# --- 5. RECURSIVE MEMORY & FACTOR WEIGHTING ---
+# --- 6. RECURSIVE MEMORY & FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -615,7 +668,7 @@ def update_memory_from_sheet(sheet, memory):
 
     return memory
 
-# --- 6. FETCH MLB ODDS & GET TODAY'S OPEN PICKS ---
+# --- 7. FETCH MLB ODDS & GET TODAY'S OPEN PICKS ---
 def fetch_mlb_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
@@ -656,7 +709,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 7. GENERATE PICKS VIA GEMINI WITH BALANCED MULTI-FACTOR SYNTHESIS ---
+# --- 8. GENERATE PICKS VIA GEMINI WITH GROUNDED PITCHER & BULLPEN CONTEXT ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -673,8 +726,8 @@ def parse_json_from_response(response):
     clean_text = raw_text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_text)
 
-def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
-    print("Sending MLB odds data, multi-factor weights, and bullpen context to Gemini...")
+def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
+    print("Sending MLB odds data, confirmed pitchers, multi-factor weights, and bullpen context to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -687,20 +740,22 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
+    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL MLB STATS API) ===
+    {json.dumps(probable_pitchers, indent=2)}
+
     === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
     {json.dumps(bullpen_logs, indent=2)}
 
-    CRITICAL REASONING & SYNTHESIS DIRECTIVES:
-    1. DO NOT MAKE THE REASONING ENTIRELY ABOUT BULLPENS! 
-       - Starting pitching dictates 60-70% of early-game scoring. Your primary justification MUST lead with starter predictive metrics (xFIP, SIERA, xERA, K-BB%, Stuff+) and lineup platoon splits (wRC+ vs. LHP/RHP, Statcast xwOBA/Hard-Hit%).
-       - Bullpen usage is a SECONDARY modifier: ONLY mention bullpen fatigue if a team suffered severe, verified arm strain (e.g. 4+ relievers thrown yesterday or 40+ pitches on back-to-back days) that creates a distinct late-inning vulnerability. Otherwise, omit bullpen mentions and focus on starters, lineups, and venue physics.
-       - NEVER claim a team had an 'off-day' or 'full rest' if the logs show they pitched yesterday.
+    CRITICAL REASONING & GROUND-TRUTH DIRECTIVES:
+    1. GROUND STARTING PITCHER ANALYSIS IN REAL DATA:
+       - Starting pitching dictates 60-70% of early-game scoring. Look at the CONFIRMED STARTING PITCHERS provided above.
+       - NEVER invert starter profiles! If Pitcher A has 128 K / 31 BB in 115 IP (2.97 ERA) and Pitcher B has 61 K / 24 BB in 92 IP (3.11 ERA), Pitcher A is the superior swing-and-miss strikeout pitcher.
+       - Do NOT invent fake xFIP/SIERA numbers that contradict their true strikeout and walk baselines.
 
-    2. PRIMARY ANALYTICAL PILLARS (FANGRAPHS, STATCAST, BALLPARK PAL):
-       - Starting Pitchers: FIP, xFIP, SIERA, xERA, K-BB% differential, pitch arsenal Run Values (RV/100).
-       - Lineup & Platoon Splits: wRC+, ISO, and OPS vs. Starter Handedness (vs. LHP / vs. RHP).
-       - Statcast Quality of Contact: xwOBA, Hard-Hit%, Barrel%, xBA vs. actual surface stats (identifying BABIP regression).
-       - Ballpark Pal Environmental Physics: Venue park factors, wind vector/speed, temperature, air density, humidity, roof configuration.
+    2. BALANCED REASONING FOCUS:
+       - Lead with Starting Pitcher matchup dynamics (handedness, command, strikeout baseline, pitch arsenals) and Lineup Platoon splits (wRC+ vs LHP/RHP, Statcast xwOBA/Hard-Hit%).
+       - Bullpen usage is a SECONDARY modifier: ONLY mention bullpen fatigue if a team suffered severe, verified arm strain (e.g. 4+ relievers thrown yesterday or 40+ pitches on back-to-back days) from the logs above. If both relief units are normal, focus strictly on starters, lineups, and venue physics.
+       - Ballpark Pal physics: Incorporate park factors, wind vector/speed, temperature, and roof status.
 
     3. MULTI-SOURCE CONSENSUS (COLUMN 15):
        - Cross-reference daily computer projections and consensus picks from FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
@@ -720,7 +775,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" balancing starter expected metrics, platoon wRC+, Statcast splits, and environment.
+         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" anchored to confirmed starter metrics and platoon splits.
          DO NOT create a duplicate entry in "new_picks".
        - If market movement, pitching change, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
@@ -741,7 +796,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "reason": "<balanced multi-factor reasoning citing starter xFIP/SIERA, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
+          "reason": "<balanced multi-factor reasoning citing verified starter metrics, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
         }}
       ],
       "new_picks": [
@@ -756,7 +811,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "units": 1.0,
-          "reasoning": "<balanced multi-factor reasoning citing starter xFIP/SIERA, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
+          "reasoning": "<balanced multi-factor reasoning citing verified starter metrics, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
         }}
       ]
     }}
@@ -794,7 +849,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
 
     return {"validations": [], "new_picks": []}
 
-# --- 8. GAME-LEVEL DEDUPLICATION HELPER ---
+# --- 9. GAME-LEVEL DEDUPLICATION HELPER ---
 def extract_canonical_teams_from_game(game_str):
     parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
     cleaned = [match_canonical_team(p) for p in parts if p.strip()]
@@ -850,25 +905,28 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
-    # 1. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
+    # 1. Fetch Confirmed Probable Pitchers directly from Official MLB API
+    probable_pitchers = fetch_today_probable_pitchers(today_date_str)
+
+    # 2. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
     bullpen_logs = fetch_recent_bullpen_usage(days_back=2)
 
-    # 2. Fetch Live Odds
+    # 3. Fetch Live Odds
     odds = fetch_mlb_odds(odds_key)
     if not odds:
         print("WARNING: No live MLB odds returned. Completed grading and evolution log.")
         return
 
-    # 3. Process Re-Evaluations and New Picks
+    # 4. Process Re-Evaluations and New Picks
     open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, bullpen_logs)
+    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, bullpen_logs, probable_pitchers)
 
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
 
     val_notes = []
     
-    # 4. Process Validations & In-Place Updates on Existing Rows
+    # 5. Process Validations & In-Place Updates on Existing Rows
     if validations:
         print(f"Processing {len(validations)} pick validation update(s)...")
         for val in validations:
@@ -897,7 +955,7 @@ def main():
 
                 print(f"Row {row_idx} evaluated as {action}.")
 
-    # 5. Append Only Genuinely New / Replacement Picks
+    # 6. Append Only Genuinely New / Replacement Picks
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
