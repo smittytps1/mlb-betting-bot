@@ -9,6 +9,56 @@ from zoneinfo import ZoneInfo
 from google import genai
 from google.genai import errors
 
+# --- TEAM NAME NORMALIZATION & ALIAS MAPPING ---
+MLB_TEAM_ALIASES = {
+    "arizona diamondbacks": ["arizona diamondbacks", "diamondbacks", "d-backs", "dbacks", "ari", "arizona"],
+    "atlanta braves": ["atlanta braves", "braves", "atl", "atlanta"],
+    "baltimore orioles": ["baltimore orioles", "orioles", "o's", "os", "bal", "baltimore"],
+    "boston red sox": ["boston red sox", "red sox", "bos", "boston"],
+    "chicago white sox": ["chicago white sox", "white sox", "cws", "chw", "chicago sox"],
+    "chicago cubs": ["chicago cubs", "cubs", "chc", "cubs"],
+    "cincinnati reds": ["cincinnati reds", "reds", "cin", "cincinnati"],
+    "cleveland guardians": ["cleveland guardians", "guardians", "cle", "cleveland", "indians"],
+    "colorado rockies": ["colorado rockies", "rockies", "col", "colorado"],
+    "detroit tigers": ["detroit tigers", "tigers", "det", "detroit"],
+    "houston astros": ["houston astros", "astros", "hou", "houston"],
+    "kansas city royals": ["kansas city royals", "royals", "kc", "kansas city"],
+    "los angeles angels": ["los angeles angels", "angels", "laa", "anaheim"],
+    "los angeles dodgers": ["los angeles dodgers", "dodgers", "lad", "la dodgers"],
+    "miami marlins": ["miami marlins", "marlins", "mia", "miami"],
+    "milwaukee brewers": ["milwaukee brewers", "brewers", "mil", "milwaukee"],
+    "minnesota twins": ["minnesota twins", "twins", "min", "minnesota"],
+    "new york mets": ["new york mets", "mets", "nym", "ny mets"],
+    "new york yankees": ["new york yankees", "yankees", "nyy", "ny yankees"],
+    "oakland athletics": ["oakland athletics", "athletics", "a's", "as", "oak", "oakland", "sacramento athletics", "las vegas athletics"],
+    "philadelphia phillies": ["philadelphia phillies", "phillies", "philly", "phi", "philadelphia"],
+    "pittsburgh pirates": ["pittsburgh pirates", "pirates", "bucs", "pit", "pittsburgh"],
+    "san diego padres": ["san diego padres", "padres", "sd", "san diego"],
+    "san francisco giants": ["san francisco giants", "giants", "sf", "san francisco"],
+    "seattle mariners": ["seattle mariners", "mariners", "sea", "seattle"],
+    "st. louis cardinals": ["st. louis cardinals", "cardinals", "cards", "stl", "st louis cardinals", "st. louis", "st louis"],
+    "tampa bay rays": ["tampa bay rays", "rays", "tb", "tampa bay", "tampa"],
+    "texas rangers": ["texas rangers", "rangers", "tex", "texas"],
+    "toronto blue jays": ["toronto blue jays", "blue jays", "jays", "tor", "toronto"],
+    "washington nationals": ["washington nationals", "nationals", "nats", "wsh", "was", "washington"]
+}
+
+def normalize_text(text):
+    return re.sub(r'[^a-z0-9]', '', str(text).lower())
+
+def match_canonical_team(name_str):
+    """Maps any input string, abbreviation, or city name to the official canonical MLB team name."""
+    if not name_str:
+        return ""
+    cleaned = str(name_str).strip().lower()
+    cleaned_norm = normalize_text(cleaned)
+
+    for canonical, aliases in MLB_TEAM_ALIASES.items():
+        for alias in aliases:
+            if alias == cleaned or normalize_text(alias) == cleaned_norm or alias in cleaned or cleaned in alias:
+                return canonical.title()
+    return name_str.strip().title()
+
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheets():
     print("Connecting to Google Sheets (MLB Tab)...")
@@ -99,7 +149,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
 
 # --- 2. OFFICIAL MLB STATS API: RECENT BOX SCORES & BULLPEN USAGE ---
 def fetch_recent_bullpen_usage(days_back=2):
-    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API."""
+    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API with canonical mapping."""
     print(f"Fetching official MLB box scores & bullpen logs for last {days_back} day(s)...")
     bullpen_logs = {}
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -119,49 +169,52 @@ def fetch_recent_bullpen_usage(days_back=2):
                 continue
 
             for game in dates[0].get("games", []):
-                game_pk = game.get("gamePk")
                 status = game.get("status", {}).get("abstractGameState")
                 if status != "Final":
                     continue
 
                 teams = game.get("teams", {})
                 for side in ["away", "home"]:
-                    team_info = teams.get(side, {})
-                    team_name = team_info.get("team", {}).get("name")
-                    if not team_name:
+                    team_data = teams.get(side, {})
+                    raw_name = team_data.get("team", {}).get("name", "")
+                    canonical_name = match_canonical_team(raw_name)
+                    if not canonical_name:
                         continue
 
-                    if team_name not in bullpen_logs:
-                        bullpen_logs[team_name] = []
+                    if canonical_name not in bullpen_logs:
+                        bullpen_logs[canonical_name] = []
+
+                    opp_raw = teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name", "")
+                    opp_canonical = match_canonical_team(opp_raw)
 
                     box = game.get("boxscore", {}).get("teams", {}).get(side, {})
-                    pitcher_ids = box.get("pitchers", [])
+                    pitchers = box.get("pitchers", [])
                     players = box.get("players", {})
 
-                    # Skip the starter (index 0) and evaluate relievers (index 1+)
-                    if len(pitcher_ids) > 1:
+                    if len(pitchers) > 1:
                         relievers_used = []
-                        for pid in pitcher_ids[1:]:
+                        # Index 0 is the starter; index 1+ are relievers
+                        for pid in pitchers[1:]:
                             p_key = f"ID{pid}"
-                            p_data = players.get(p_key, {})
-                            p_name = p_data.get("person", {}).get("fullName", "Unknown")
-                            stats = p_data.get("stats", {}).get("pitching", {})
-                            pitches = stats.get("pitches", 0)
-                            ip = stats.get("inningsPitched", "0.0")
+                            p_info = players.get(p_key, {})
+                            p_name = p_info.get("person", {}).get("fullName", "Reliever")
+                            p_stats = p_info.get("stats", {}).get("pitching", {})
+                            pitches = p_stats.get("pitches", 0)
+                            ip = p_stats.get("inningsPitched", "0.0")
                             relievers_used.append(f"{p_name} ({ip} IP, {pitches} P)")
 
-                        bullpen_logs[team_name].append({
+                        bullpen_logs[canonical_name].append({
                             "date": target_date,
-                            "game_vs": teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name"),
-                            "relievers_used_count": len(relievers_used),
-                            "pitcher_logs": relievers_used
+                            "opponent": opp_canonical,
+                            "reliever_count": len(relievers_used),
+                            "arms_used": relievers_used
                         })
                     else:
-                        bullpen_logs[team_name].append({
+                        bullpen_logs[canonical_name].append({
                             "date": target_date,
-                            "game_vs": teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name"),
-                            "relievers_used_count": 0,
-                            "pitcher_logs": ["Complete Game / No Bullpen Used"]
+                            "opponent": opp_canonical,
+                            "reliever_count": 0,
+                            "arms_used": ["Starter threw complete game / No relievers used"]
                         })
         except Exception as e:
             print(f"Notice fetching MLB box score for {target_date}: {e}")
@@ -237,7 +290,11 @@ def auto_grade_pending_bets(sheet, odds_key):
                 away_team = match.get("away_team", "")
                 commence_time_str = match.get("commence_time", "")
 
-                if home_team in game_title or away_team in game_title:
+                home_canonical = match_canonical_team(home_team)
+                away_canonical = match_canonical_team(away_team)
+
+                if (home_canonical in game_title or away_canonical in game_title or
+                    home_team in game_title or away_team in game_title):
                     if commence_time_str and pulled_dt:
                         try:
                             game_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
@@ -283,7 +340,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                         spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
                         spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
                         
-                        is_home_pick = home_team.lower() in pick_lower
+                        is_home_pick = (home_canonical.lower() in pick_lower or home_team.lower() in pick_lower)
                         pick_score = home_score if is_home_pick else away_score
                         opp_score = away_score if is_home_pick else home_score
 
@@ -299,7 +356,12 @@ def auto_grade_pending_bets(sheet, odds_key):
                     # 3. MONEYLINE
                     else:
                         winner = home_team if home_score > away_score else away_team
-                        is_win = (pick_lower in winner.lower() or winner.lower() in pick_lower)
+                        winner_canonical = match_canonical_team(winner)
+                        pick_canonical = match_canonical_team(pick_str)
+
+                        is_win = (pick_canonical.lower() == winner_canonical.lower() or 
+                                  pick_lower in winner.lower() or 
+                                  winner.lower() in pick_lower)
                         status = "WIN" if is_win else "LOSS"
 
                     if status == "WIN":
@@ -604,7 +666,7 @@ def parse_json_from_response(response):
     return json.loads(clean_text)
 
 def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
-    print("Sending MLB odds data, bullpen box scores, multi-factor weights, and memory to Gemini...")
+    print("Sending MLB odds data, canonical bullpen box scores, multi-factor weights, and memory to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -621,9 +683,9 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
     {json.dumps(bullpen_logs, indent=2)}
 
     CRITICAL FACTUAL GROUND TRUTH DIRECTIVES (ANTI-HALLUCINATION):
-    - NEVER fabricate an 'off-day', schedule break, or rest advantage unless verified in the actual game schedule.
+    - NEVER fabricate an 'off-day', schedule break, or rest advantage unless verified in the actual game schedule above.
     - Reference the exact bullpen logs above when evaluating reliever fatigue, burned arms, and multi-inning usage over the last 1-2 days.
-    - If a team used 4+ relievers yesterday, they are TAXED. If they did not play yesterday, only then do they have an off-day rest advantage.
+    - If a team used 3+ relievers yesterday, they are TAXED. If they did not play yesterday, only then do they have an off-day rest advantage.
 
     === QUANTITATIVE RESEARCH METHODOLOGY & ANALYTICAL SOURCES ===
     1. FANGRAPHS / ADVANCED PITCHING METRICS:
@@ -736,16 +798,13 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
     return {"validations": [], "new_picks": []}
 
 # --- 8. GAME-LEVEL DEDUPLICATION HELPER ---
-def normalize_string(text):
-    return re.sub(r'[^a-z0-9]', '', str(text).lower())
-
-def extract_sorted_teams(game_str):
+def extract_canonical_teams_from_game(game_str):
     parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
-    cleaned = [normalize_string(p) for p in parts if p.strip()]
+    cleaned = [match_canonical_team(p) for p in parts if p.strip()]
     return tuple(sorted(cleaned))
 
 def game_already_pending(raw_rows, pick_date, game):
-    """Checks if there is already an active pending pick for this exact game today."""
+    """Checks if there is already an active pending pick for this exact game today using canonical team names."""
     if len(raw_rows) <= 1:
         return False
 
@@ -757,14 +816,14 @@ def game_already_pending(raw_rows, pick_date, game):
     except ValueError:
         return False
 
-    norm_teams = extract_sorted_teams(game)
+    norm_teams = extract_canonical_teams_from_game(game)
 
     for r in raw_rows[1:]:
         if len(r) <= max(date_col, game_col, status_col):
             continue
 
         r_date = str(r[date_col]).strip()
-        r_teams = extract_sorted_teams(r[game_col])
+        r_teams = extract_canonical_teams_from_game(r[game_col])
         r_status = str(r[status_col]).strip().upper()
 
         if r_date == pick_date and r_teams == norm_teams and r_status == "PENDING":
@@ -794,7 +853,7 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
-    # 1. Fetch Real Bullpen Usage from Official MLB API
+    # 1. Fetch Real Bullpen Usage from Official MLB API with Canonical Matching
     bullpen_logs = fetch_recent_bullpen_usage(days_back=2)
 
     # 2. Fetch Live Odds
