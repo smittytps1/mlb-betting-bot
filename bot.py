@@ -47,7 +47,6 @@ def normalize_text(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
 def match_canonical_team(name_str):
-    """Maps any input string, abbreviation, or city name to the official canonical MLB team name."""
     if not name_str:
         return ""
     cleaned = str(name_str).strip().lower()
@@ -149,7 +148,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
 
 # --- 2. OFFICIAL MLB STATS API: DIRECT BOX SCORE INGESTION ---
 def fetch_recent_bullpen_usage(days_back=2):
-    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API directly by gamePk."""
+    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API."""
     print(f"Fetching official MLB box scores & bullpen logs for last {days_back} day(s)...")
     bullpen_logs = {}
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -207,7 +206,6 @@ def fetch_recent_bullpen_usage(days_back=2):
 
                     if len(pitchers) > 1:
                         relievers_used = []
-                        # Pitcher at index 0 is the starter; index 1+ are relievers
                         for pid in pitchers[1:]:
                             p_key = f"ID{pid}"
                             p_info = players.get(p_key, {})
@@ -442,10 +440,6 @@ def load_memory():
                 "wins": 0, "losses": 0, "weight": 1.0, 
                 "instruction": "Evaluate FIP, xFIP, SIERA, xERA, K-BB%, CSW%, Stuff+, Location+, and pitch arsenal Run Values (RV/100)."
             },
-            "bullpen_depth_and_fatigue": {
-                "wins": 0, "losses": 0, "weight": 1.0, 
-                "instruction": "Evaluate verified MLB box scores, 1-3 day rolling pitch usage via RosterResource, leverage-tier SIERA, and middle relief vulnerabilities."
-            },
             "platoon_and_lineup_splits": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
                 "instruction": "Evaluate wRC+ and OPS splits vs LHP/RHP, confirmed daily starting lineups, and key rest spots."
@@ -458,13 +452,17 @@ def load_memory():
                 "wins": 0, "losses": 0, "weight": 1.0, 
                 "instruction": "Evaluate Ballpark Pal venue simulations, park factors, wind vectors, temperature, air density, humidity, and roof status."
             },
-            "umpire_and_situational_fatigue": {
-                "wins": 0, "losses": 0, "weight": 1.0, 
-                "instruction": "Evaluate home plate umpire strike zone tendencies, day-after-night games, cross-country travel, and getaway days."
-            },
             "multi_source_consensus_and_divergence": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
                 "instruction": "Evaluate multi-model alignment across FanGraphs, Ballpark Pal, TeamRankings, Covers, and sharp money splits."
+            },
+            "bullpen_depth_and_fatigue": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate verified MLB box scores and 1-3 day rolling pitch usage only when extreme fatigue or rest disparity exists."
+            },
+            "umpire_and_situational_fatigue": {
+                "wins": 0, "losses": 0, "weight": 1.0, 
+                "instruction": "Evaluate home plate umpire strike zone tendencies, day-after-night games, cross-country travel, and getaway days."
             }
         }
     }
@@ -514,12 +512,12 @@ def update_memory_from_sheet(sheet, memory):
 
         keywords_map = {
             "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "k-bb", "k/bb", "starter", "strikeout", "stuff+", "location+", "pitch arsenal", "rv/100"],
-            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "3-day", "fatigue", "rosterresource", "middle relief", "high-leverage", "pitch count", "boxscore", "burned"],
             "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup", "rest day", "handedness", "splits"],
             "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg", "babip", "savant", "exit velocity"],
             "ballpark_and_weather_simulation": ["ballpark pal", "park factor", "wind", "air density", "temperature", "humidity", "weather", "altitude", "coors", "roof"],
-            "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"],
-            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs", "ballpark pal", "model agreement", "split projection", "divergence", "sharp split", "high agreement"]
+            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs", "ballpark pal", "model agreement", "split projection", "divergence", "sharp split", "high agreement"],
+            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "3-day", "fatigue", "rosterresource", "middle relief", "high-leverage", "pitch count", "boxscore", "burned"],
+            "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"]
         }
 
         for r in rows[1:]:
@@ -658,7 +656,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 7. GENERATE PICKS VIA GEMINI WITH GROUNDED BULLPEN LOGS ---
+# --- 7. GENERATE PICKS VIA GEMINI WITH BALANCED MULTI-FACTOR SYNTHESIS ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -676,7 +674,7 @@ def parse_json_from_response(response):
     return json.loads(clean_text)
 
 def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
-    print("Sending MLB odds data, canonical bullpen box scores, multi-factor weights, and memory to Gemini...")
+    print("Sending MLB odds data, multi-factor weights, and bullpen context to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -689,34 +687,24 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
-    === VERIFIED OFFICIAL MLB BULLPEN USAGE (LAST 48 HOURS FROM OFFICIAL MLB BOX SCORES) ===
+    === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
     {json.dumps(bullpen_logs, indent=2)}
 
-    CRITICAL FACTUAL GROUND TRUTH DIRECTIVES (ANTI-HALLUCINATION):
-    - Reference the exact bullpen logs above when evaluating reliever fatigue, burned arms, and pitch counts over the last 1-2 days.
-    - NEVER claim a team had an 'off-day' or 'full bullpen rest' if the logs above show they pitched yesterday!
-    - If a team threw 3+ relievers yesterday, their high-leverage arms are TAXED. Cite their actual pitch counts in your reasoning.
+    CRITICAL REASONING & SYNTHESIS DIRECTIVES:
+    1. DO NOT MAKE THE REASONING ENTIRELY ABOUT BULLPENS! 
+       - Starting pitching dictates 60-70% of early-game scoring. Your primary justification MUST lead with starter predictive metrics (xFIP, SIERA, xERA, K-BB%, Stuff+) and lineup platoon splits (wRC+ vs. LHP/RHP, Statcast xwOBA/Hard-Hit%).
+       - Bullpen usage is a SECONDARY modifier: ONLY mention bullpen fatigue if a team suffered severe, verified arm strain (e.g. 4+ relievers thrown yesterday or 40+ pitches on back-to-back days) that creates a distinct late-inning vulnerability. Otherwise, omit bullpen mentions and focus on starters, lineups, and venue physics.
+       - NEVER claim a team had an 'off-day' or 'full rest' if the logs show they pitched yesterday.
 
-    === QUANTITATIVE RESEARCH METHODOLOGY & ANALYTICAL SOURCES ===
-    1. FANGRAPHS / ADVANCED PITCHING METRICS:
-       - Starting pitching dictates 60-70% of early-game scoring. Look past surface ERA.
-       - Focus heavily on: FIP, xFIP, SIERA, xERA, K-BB%, CSW%, Stuff+/Location+, and pitch mix arsenal Run Values (RV/100).
-    2. ROSTERRESOURCE & OFFICIAL BOX SCORES / BULLPEN FATIGUE:
-       - Starters rarely go past 5-6 innings. Evaluate the verified pitch counts provided above.
-       - A taxed bullpen forced to use low-leverage arms often drives late-game scoring spikes.
-    3. PLATOON & LINEUP CHANGES:
-       - Handedness splits (wRC+ and OPS vs LHP/RHP) and confirmed daily starting 9 changes.
-    4. BASEBALL SAVANT / STATCAST CONTACT QUALITY:
-       - xwOBA, Hard-Hit%, Barrel%, xBA, and xSLG to identify BABIP anomalies vs genuine authority.
-    5. BALLPARK PAL / ENVIRONMENTAL PHYSICS:
-       - Stadium park factors, wind vectors/speed, temperature, air density, humidity, altitude, roof status.
-    6. UMPIRE & SITUATIONAL SPOTS:
-       - Umpire strike zone tendencies, day-after-night games, cross-country travel, getaway days.
-    7. MULTI-SOURCE CONSENSUS & DIVERGENCE SYNTHESIS:
-       - Cross-reference projections and consensus from: FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
-       - IN COLUMN 15 OUTPUT: Provide a detailed, specific string identifying which sites agree and their projected values.
-         * Example if high agreement: "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: PHI 64%, Covers: Sharp ML)"
-         * Example if split/divergent: "No (Split: FanGraphs on NYY 52% vs BallparkPal on BAL 54%)"
+    2. PRIMARY ANALYTICAL PILLARS (FANGRAPHS, STATCAST, BALLPARK PAL):
+       - Starting Pitchers: FIP, xFIP, SIERA, xERA, K-BB% differential, pitch arsenal Run Values (RV/100).
+       - Lineup & Platoon Splits: wRC+, ISO, and OPS vs. Starter Handedness (vs. LHP / vs. RHP).
+       - Statcast Quality of Contact: xwOBA, Hard-Hit%, Barrel%, xBA vs. actual surface stats (identifying BABIP regression).
+       - Ballpark Pal Environmental Physics: Venue park factors, wind vector/speed, temperature, air density, humidity, roof configuration.
+
+    3. MULTI-SOURCE CONSENSUS (COLUMN 15):
+       - Cross-reference daily computer projections and consensus picks from FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
+       - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)" or "No (Split: FanGraphs on NYY 52% vs BallparkPal on BAL 54%)").
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -732,15 +720,14 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" reflecting true bullpen usage.
+         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" balancing starter expected metrics, platoon wRC+, Statcast splits, and environment.
          DO NOT create a duplicate entry in "new_picks".
-       - If market movement, pitching change, verified bullpen fatigue, or deeper multi-model divergence proves the OPPOSITE side is now superior:
+       - If market movement, pitching change, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
          Put the NEW opposite pick into "new_picks".
 
     2. NEW MATCHUPS:
        - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
-       - In "high_agreement", explicitly state the model names and simulated values.
        - Never recommend more than 5 total active bets across the entire slate.
 
     OUTPUT SCHEMA (STRICT JSON ONLY):
@@ -754,7 +741,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, verified bullpen pitch counts from logs above, Statcast splits, environment, and consensus alignment>"
+          "reason": "<balanced multi-factor reasoning citing starter xFIP/SIERA, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
         }}
       ],
       "new_picks": [
@@ -769,7 +756,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "units": 1.0,
-          "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, verified bullpen pitch counts from logs above, Statcast splits, environment, and consensus alignment>"
+          "reasoning": "<balanced multi-factor reasoning citing starter xFIP/SIERA, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
         }}
       ]
     }}
