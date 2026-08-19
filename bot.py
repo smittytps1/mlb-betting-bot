@@ -147,53 +147,66 @@ def update_evolution_log(spreadsheet, sport_label, memory, validations_summary, 
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. OFFICIAL MLB STATS API: RECENT BOX SCORES & BULLPEN USAGE ---
+# --- 2. OFFICIAL MLB STATS API: DIRECT BOX SCORE INGESTION ---
 def fetch_recent_bullpen_usage(days_back=2):
-    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API with canonical mapping."""
+    """Fetches verified reliever pitch counts and box scores from MLB's official Stats API directly by gamePk."""
     print(f"Fetching official MLB box scores & bullpen logs for last {days_back} day(s)...")
     bullpen_logs = {}
     today = datetime.now(ZoneInfo("America/New_York")).date()
 
     for d in range(1, days_back + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
-        schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}&hydrate=boxscore"
+        schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
         
         try:
-            resp = requests.get(schedule_url, timeout=10)
-            if resp.status_code != 200:
+            sched_resp = requests.get(schedule_url, timeout=10)
+            if sched_resp.status_code != 200:
                 continue
             
-            data = resp.json()
-            dates = data.get("dates", [])
+            sched_data = sched_resp.json()
+            dates = sched_data.get("dates", [])
             if not dates:
                 continue
 
-            for game in dates[0].get("games", []):
+            games = dates[0].get("games", [])
+            print(f"Found {len(games)} game(s) on {target_date}. Fetching box scores...")
+
+            for game in games:
                 status = game.get("status", {}).get("abstractGameState")
-                if status != "Final":
+                game_pk = game.get("gamePk")
+                if status != "Final" or not game_pk:
                     continue
 
-                teams = game.get("teams", {})
+                box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
+                try:
+                    box_resp = requests.get(box_url, timeout=10)
+                    if box_resp.status_code != 200:
+                        continue
+                    box_data = box_resp.json()
+                except Exception:
+                    continue
+
+                teams_box = box_data.get("teams", {})
                 for side in ["away", "home"]:
-                    team_data = teams.get(side, {})
-                    raw_name = team_data.get("team", {}).get("name", "")
-                    canonical_name = match_canonical_team(raw_name)
+                    team_box = teams_box.get(side, {})
+                    raw_team_name = team_box.get("team", {}).get("name", "")
+                    canonical_name = match_canonical_team(raw_team_name)
                     if not canonical_name:
                         continue
+
+                    opp_side = "home" if side == "away" else "away"
+                    opp_raw = teams_box.get(opp_side, {}).get("team", {}).get("name", "")
+                    opp_canonical = match_canonical_team(opp_raw)
+
+                    pitchers = team_box.get("pitchers", [])
+                    players = team_box.get("players", {})
 
                     if canonical_name not in bullpen_logs:
                         bullpen_logs[canonical_name] = []
 
-                    opp_raw = teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name", "")
-                    opp_canonical = match_canonical_team(opp_raw)
-
-                    box = game.get("boxscore", {}).get("teams", {}).get(side, {})
-                    pitchers = box.get("pitchers", [])
-                    players = box.get("players", {})
-
                     if len(pitchers) > 1:
                         relievers_used = []
-                        # Index 0 is the starter; index 1+ are relievers
+                        # Pitcher at index 0 is the starter; index 1+ are relievers
                         for pid in pitchers[1:]:
                             p_key = f"ID{pid}"
                             p_info = players.get(p_key, {})
@@ -201,25 +214,21 @@ def fetch_recent_bullpen_usage(days_back=2):
                             p_stats = p_info.get("stats", {}).get("pitching", {})
                             pitches = p_stats.get("pitches", 0)
                             ip = p_stats.get("inningsPitched", "0.0")
-                            relievers_used.append(f"{p_name} ({ip} IP, {pitches} P)")
+                            relievers_used.append(f"{p_name}: {ip} IP, {pitches} P")
 
-                        bullpen_logs[canonical_name].append({
-                            "date": target_date,
-                            "opponent": opp_canonical,
-                            "reliever_count": len(relievers_used),
-                            "arms_used": relievers_used
-                        })
+                        entry_summary = f"Played on {target_date} vs {opp_canonical} -> Used {len(relievers_used)} relievers: [{', '.join(relievers_used)}]"
+                        bullpen_logs[canonical_name].append(entry_summary)
                     else:
-                        bullpen_logs[canonical_name].append({
-                            "date": target_date,
-                            "opponent": opp_canonical,
-                            "reliever_count": 0,
-                            "arms_used": ["Starter threw complete game / No relievers used"]
-                        })
-        except Exception as e:
-            print(f"Notice fetching MLB box score for {target_date}: {e}")
+                        entry_summary = f"Played on {target_date} vs {opp_canonical} -> Starter threw complete game (0 relievers used)"
+                        bullpen_logs[canonical_name].append(entry_summary)
 
-    print(f"Loaded verified bullpen data for {len(bullpen_logs)} MLB teams.")
+        except Exception as e:
+            print(f"Notice fetching MLB schedule for {target_date}: {e}")
+
+    for t_name, logs in bullpen_logs.items():
+        print(f"  [MLB Stats API] {t_name}: {' | '.join(logs)}")
+
+    print(f"Successfully loaded verified bullpen logs for {len(bullpen_logs)} teams.")
     return bullpen_logs
 
 # --- 3. ACCURATE AUTO-GRADING VIA SCORES API ---
@@ -679,13 +688,13 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
-    === VERIFIED OFFICIAL MLB BULLPEN USAGE (LAST 48 HOURS FROM MLB STATS API) ===
+    === VERIFIED OFFICIAL MLB BULLPEN USAGE (LAST 48 HOURS FROM OFFICIAL MLB BOX SCORES) ===
     {json.dumps(bullpen_logs, indent=2)}
 
     CRITICAL FACTUAL GROUND TRUTH DIRECTIVES (ANTI-HALLUCINATION):
-    - NEVER fabricate an 'off-day', schedule break, or rest advantage unless verified in the actual game schedule above.
-    - Reference the exact bullpen logs above when evaluating reliever fatigue, burned arms, and multi-inning usage over the last 1-2 days.
-    - If a team used 3+ relievers yesterday, they are TAXED. If they did not play yesterday, only then do they have an off-day rest advantage.
+    - Reference the exact bullpen logs above when evaluating reliever fatigue, burned arms, and pitch counts over the last 1-2 days.
+    - NEVER claim a team had an 'off-day' or 'full bullpen rest' if the logs above show they pitched yesterday!
+    - If a team threw 3+ relievers yesterday, their high-leverage arms are TAXED. Cite their actual pitch counts in your reasoning.
 
     === QUANTITATIVE RESEARCH METHODOLOGY & ANALYTICAL SOURCES ===
     1. FANGRAPHS / ADVANCED PITCHING METRICS:
@@ -722,7 +731,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide any updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and "reason".
+         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" reflecting true bullpen usage.
          DO NOT create a duplicate entry in "new_picks".
        - If market movement, pitching change, verified bullpen fatigue, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
@@ -744,7 +753,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, verified bullpen pitch counts, Statcast splits, environment, and consensus alignment>"
+          "reason": "<multi-factor reasoning citing starter xFIP/SIERA, verified bullpen pitch counts from logs above, Statcast splits, environment, and consensus alignment>"
         }}
       ],
       "new_picks": [
@@ -759,7 +768,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs):
           "expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "units": 1.0,
-          "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, verified bullpen pitch counts, Statcast splits, environment, and consensus alignment>"
+          "reasoning": "<synthesized breakdown citing starter xFIP/SIERA, verified bullpen pitch counts from logs above, Statcast splits, environment, and consensus alignment>"
         }}
       ]
     }}
@@ -853,7 +862,7 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
 
-    # 1. Fetch Real Bullpen Usage from Official MLB API with Canonical Matching
+    # 1. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
     bullpen_logs = fetch_recent_bullpen_usage(days_back=2)
 
     # 2. Fetch Live Odds
