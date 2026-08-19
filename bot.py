@@ -172,7 +172,6 @@ def fetch_today_probable_pitchers(target_date_str):
                 competitors = comps[0].get("competitors", [])
                 probables = comps[0].get("probables", [])
 
-                # Map probables if defined in competition object
                 for p in probables:
                     p_name = p.get("athlete", {}).get("displayName", "TBD")
                     p_hand = p.get("athlete", {}).get("hand", {}).get("type", "Right")
@@ -188,7 +187,6 @@ def fetch_today_probable_pitchers(target_date_str):
                                 stat_str = ", ".join([f"{s.get('name')}: {s.get('displayValue')}" for s in stats_summary]) if stats_summary else "Active Starter"
                                 pitcher_map[canonical] = f"{p_name} ({hand_code} | {stat_str})"
 
-                # Direct competitor fallback
                 for c in competitors:
                     raw_name = c.get("team", {}).get("displayName", "")
                     canonical = match_canonical_team(raw_name)
@@ -736,7 +734,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 8. GENERATE PICKS VIA GEMINI WITH GROUNDED PITCHER & BULLPEN CONTEXT ---
+# --- 8. GENERATE PICKS VIA GEMINI WITH DYNAMIC EV DRIVERS ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -754,7 +752,7 @@ def parse_json_from_response(response):
     return json.loads(clean_text)
 
 def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
-    print("Sending MLB odds data, confirmed pitchers, multi-factor weights, and bullpen context to Gemini...")
+    print("Sending MLB odds data, confirmed pitchers, and dynamic reasoning prompt to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -773,19 +771,21 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
     {json.dumps(bullpen_logs, indent=2)}
 
-    CRITICAL REASONING & GROUND-TRUTH DIRECTIVES:
-    1. GROUND STARTING PITCHER ANALYSIS IN REAL DATA:
-       - Starting pitching dictates 60-70% of early-game scoring. Look at the CONFIRMED STARTING PITCHERS provided above.
-       - NEVER invert starter profiles! If Pitcher A has 128 K / 31 BB in 115 IP (2.97 ERA) and Pitcher B has 61 K / 24 BB in 92 IP (3.11 ERA), Pitcher A is the superior swing-and-miss strikeout pitcher.
-       - Do NOT invent fake xFIP/SIERA numbers that contradict their true strikeout and walk baselines.
+    CRITICAL REASONING & SYNTHESIS DIRECTIVES:
+    1. ISOLATE THE PRIMARY EV DRIVERS (DYNAMIC TAILORING):
+       - In your reasoning summary, focus ONLY on the 1-3 specific factors that MOST IMPACTED the expected value (+EV) for that particular game.
+       - DO NOT use a rigid or boilerplate checklist across all games!
+         * If Game A is driven by a massive Starter Command / xFIP mismatch + Weather, focus exclusively on that.
+         * If Game B is driven by Lineup Platoon splits (e.g. elite wRC+ vs Southpaws) against a soft-tossing starter, focus on the hitting splits.
+         * If Game C is driven by acute relief corps exhaustion (e.g. 4+ relievers thrown on back-to-back days), highlight the bullpen collapse risk.
+         * If Game D is driven by pure Market Pricing Misalignment / High Model Consensus, focus on the probability vs line discrepancy.
 
-    2. BALANCED REASONING FOCUS:
-       - Lead with Starting Pitcher matchup dynamics (handedness, command, strikeout baseline, pitch arsenals) and Lineup Platoon splits (wRC+ vs LHP/RHP, Statcast xwOBA/Hard-Hit%).
-       - Bullpen usage is a SECONDARY modifier: ONLY mention bullpen fatigue if a team suffered severe, verified arm strain (e.g. 4+ relievers thrown yesterday or 40+ pitches on back-to-back days) from the logs above. If both relief units are normal, focus strictly on starters, lineups, and venue physics.
-       - Ballpark Pal physics: Incorporate park factors, wind vector/speed, temperature, and roof status.
+    2. GROUND-TRUTH FACTUAL RIGOR:
+       - Only cite the confirmed starting pitchers provided above. Never invert who has the better strikeout/walk metrics or invent players who do not pitch for that team.
+       - Never claim a team had an 'off-day' if the bullpen logs show they pitched yesterday.
 
     3. MULTI-SOURCE CONSENSUS (COLUMN 15):
-       - Cross-reference daily computer projections and consensus picks from FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
+       - Cross-reference projections and consensus from: FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
        - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)" or "No (Split: FanGraphs on NYY 52% vs BallparkPal on BAL 54%)").
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
@@ -802,7 +802,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
        For every pick listed in ACTIVE OPEN PICKS:
        - If you agree with the current side/pick: 
          Set "action": "VALIDATED". 
-         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" anchored to confirmed starter metrics and platoon splits.
+         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" highlighting the primary EV driver.
          DO NOT create a duplicate entry in "new_picks".
        - If market movement, pitching change, or deeper multi-model divergence proves the OPPOSITE side is now superior:
          Set "action": "REJECTED" with "reason".
@@ -823,7 +823,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "reason": "<balanced multi-factor reasoning citing verified starter metrics, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
+          "reason": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
         }}
       ],
       "new_picks": [
@@ -838,7 +838,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
           "expected_value": "+10.7%",
           "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
           "units": 1.0,
-          "reasoning": "<balanced multi-factor reasoning citing verified starter metrics, platoon wRC+, Statcast xwOBA, venue physics, and consensus>"
+          "reasoning": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
         }}
       ]
     }}
