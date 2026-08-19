@@ -153,13 +153,14 @@ def fetch_recent_bullpen_usage(days_back=2):
     print(f"Fetching official MLB box scores & bullpen logs for last {days_back} day(s)...")
     bullpen_logs = {}
     today = datetime.now(ZoneInfo("America/New_York")).date()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
     for d in range(1, days_back + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
         schedule_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}"
         
         try:
-            sched_resp = requests.get(schedule_url, timeout=10)
+            sched_resp = requests.get(schedule_url, headers=headers, timeout=10)
             if sched_resp.status_code != 200:
                 continue
             
@@ -169,7 +170,7 @@ def fetch_recent_bullpen_usage(days_back=2):
                 continue
 
             games = dates[0].get("games", [])
-            print(f"Found {len(games)} game(s) on {target_date}. Fetching box scores...")
+            print(f"Found {len(games)} game(s) on {target_date}. Parsing pitch logs...")
 
             for game in games:
                 status = game.get("status", {}).get("abstractGameState")
@@ -179,7 +180,7 @@ def fetch_recent_bullpen_usage(days_back=2):
 
                 box_url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
                 try:
-                    box_resp = requests.get(box_url, timeout=10)
+                    box_resp = requests.get(box_url, headers=headers, timeout=10)
                     if box_resp.status_code != 200:
                         continue
                     box_data = box_resp.json()
@@ -212,14 +213,14 @@ def fetch_recent_bullpen_usage(days_back=2):
                             p_info = players.get(p_key, {})
                             p_name = p_info.get("person", {}).get("fullName", "Reliever")
                             p_stats = p_info.get("stats", {}).get("pitching", {})
-                            pitches = p_stats.get("pitches", 0)
+                            pitches = p_stats.get("pitches", p_stats.get("numberOfPitches", 0))
                             ip = p_stats.get("inningsPitched", "0.0")
-                            relievers_used.append(f"{p_name}: {ip} IP, {pitches} P")
+                            relievers_used.append(f"{p_name} ({ip} IP, {pitches} P)")
 
-                        entry_summary = f"Played on {target_date} vs {opp_canonical} -> Used {len(relievers_used)} relievers: [{', '.join(relievers_used)}]"
+                        entry_summary = f"Played {target_date} vs {opp_canonical}: Used {len(relievers_used)} relievers -> [{', '.join(relievers_used)}]"
                         bullpen_logs[canonical_name].append(entry_summary)
                     else:
-                        entry_summary = f"Played on {target_date} vs {opp_canonical} -> Starter threw complete game (0 relievers used)"
+                        entry_summary = f"Played {target_date} vs {opp_canonical}: Starter threw complete game (0 relievers used)"
                         bullpen_logs[canonical_name].append(entry_summary)
 
         except Exception as e:
