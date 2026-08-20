@@ -58,6 +58,32 @@ def match_canonical_team(name_str):
                 return canonical.title()
     return name_str.strip().title()
 
+# --- MATHEMATICAL STAKING: QUARTER-KELLY CRITERION ---
+def american_to_decimal(odds):
+    try:
+        odds_f = float(odds)
+        if odds_f > 0:
+            return (odds_f / 100.0) + 1.0
+        else:
+            return (100.0 / abs(odds_f)) + 1.0
+    except Exception:
+        return 1.91
+
+def compute_quarter_kelly_units(odds, model_prob_str):
+    """Calculates Quarter-Kelly (0.25x) stake size bounded safely between 0.5u and 2.0u."""
+    try:
+        prob_val = float(str(model_prob_str).replace('%', '').strip()) / 100.0
+        dec_odds = american_to_decimal(odds)
+        b = dec_odds - 1.0
+        p = prob_val
+        q = 1.0 - p
+
+        kelly = (b * p - q) / b
+        quarter_kelly = (kelly * 0.25) * 10.0 # Scale to standard 1.0 unit baseline
+        return max(0.5, min(2.0, round(quarter_kelly, 2)))
+    except Exception:
+        return 1.0
+
 # --- 1. GOOGLE SHEETS AUTHENTICATION & SETUP ---
 def get_sheets():
     print("Connecting to Google Sheets (MLB Tab)...")
@@ -77,7 +103,7 @@ def get_sheets():
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
-    """Ensures row 1 contains all 15 column headers including High Agreement and Validation."""
+    """Ensures row 1 contains all 15 column headers."""
     try:
         existing_rows = sheet.get_all_values()
         headers = [
@@ -99,7 +125,7 @@ def ensure_headers(sheet):
         print(f"Header formatting notice: {e}")
 
 def ensure_evolution_sheet(spreadsheet):
-    """Safely guarantees the 'Evolution & Learnings' tab exists and has headers."""
+    """Guarantees the 'Evolution & Learnings' tab exists and has headers."""
     try:
         try:
             evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
@@ -728,13 +754,14 @@ def get_today_existing_picks(sheet, today_date_str):
                     "implied_prob": r[6] if len(r) > 6 else "",
                     "model_prob": r[7] if len(r) > 7 else "",
                     "expected_value": r[8] if len(r) > 8 else "",
+                    "units": r[9] if len(r) > 9 else 1.0,
                     "reasoning": r[12] if len(r) > 12 else "",
                     "validation": r[13] if len(r) > 13 else "",
                     "high_agreement": r[14] if len(r) > 14 else "No"
                 })
     return existing
 
-# --- 8. GENERATE PICKS VIA GEMINI WITH DYNAMIC EV DRIVERS ---
+# --- 8. GENERATE PICKS VIA GEMINI WITH AUDIT-OPTIMIZED FILTERING ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -752,12 +779,12 @@ def parse_json_from_response(response):
     return json.loads(clean_text)
 
 def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
-    print("Sending MLB odds data, confirmed pitchers, and dynamic reasoning prompt to Gemini...")
+    print("Sending MLB odds data, confirmed pitchers, and audit-optimized prompt to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an adaptive quantitative MLB betting strategist executing deep multi-variable synthesis with recursive self-learning.
+    You are an elite quantitative MLB betting engine executing deep multi-variable synthesis and risk-adjusted bankroll management.
 
     === RECURSIVE MEMORY & EMPIRICAL PERFORMANCE REFLECTION ===
     {json.dumps(memory, indent=2)}
@@ -771,22 +798,26 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
     {json.dumps(bullpen_logs, indent=2)}
 
-    CRITICAL REASONING & SYNTHESIS DIRECTIVES:
-    1. ISOLATE THE PRIMARY EV DRIVERS (DYNAMIC TAILORING):
-       - In your reasoning summary, focus ONLY on the 1-3 specific factors that MOST IMPACTED the expected value (+EV) for that particular game.
-       - DO NOT use a rigid or boilerplate checklist across all games!
-         * If Game A is driven by a massive Starter Command / xFIP mismatch + Weather, focus exclusively on that.
-         * If Game B is driven by Lineup Platoon splits (e.g. elite wRC+ vs Southpaws) against a soft-tossing starter, focus on the hitting splits.
-         * If Game C is driven by acute relief corps exhaustion (e.g. 4+ relievers thrown on back-to-back days), highlight the bullpen collapse risk.
-         * If Game D is driven by pure Market Pricing Misalignment / High Model Consensus, focus on the probability vs line discrepancy.
+    CRITICAL AUDIT-OPTIMIZED RULES & MATHEMATICAL CONSTRAINTS:
+    1. MARKET DIVERSIFICATION (AVOID MONEYLINE OVER-EXPOSURE):
+       - Historical audit proves Run Lines (+1.5/-1.5) and Totals (Over/Under) have a 75-100% win rate, while full-game Moneylines have underperformed.
+       - Actively explore Run Lines (+1.5 / -1.5) and Game Totals (Over/Under) whenever starting pitching command and park factors create clear variance advantages.
+       - Recommend no more than 2 full-game Moneylines per slate.
 
-    2. GROUND-TRUTH FACTUAL RIGOR:
-       - Only cite the confirmed starting pitchers provided above. Never invert who has the better strikeout/walk metrics or invent players who do not pitch for that team.
+    2. UNDERDOG SHRINKAGE & HIGHER EV THRESHOLDS:
+       - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV and unanimous multi-source consensus.
+       - Never inflate underdog model win probabilities more than +3.5% above market implied probability.
+
+    3. DYNAMIC PRIMARY-DRIVER REASONING:
+       - In your reasoning summary, isolate ONLY the 1-3 primary factors that created the EV edge (e.g. Starter Strikeout/Command Mismatch, Platoon wRC+ Split, or Weather/Park Factor Dynamics). Do NOT use generic boilerplate checklists.
+
+    4. STRICT GROUND-TRUTH FACTUAL RIGOR:
+       - Only reference the confirmed starting pitchers provided above. Never invert pitcher metrics or invent players who do not pitch for that team.
        - Never claim a team had an 'off-day' if the bullpen logs show they pitched yesterday.
 
-    3. MULTI-SOURCE CONSENSUS (COLUMN 15):
-       - Cross-reference projections and consensus from: FanGraphs (ZiPS/Steamer), Ballpark Pal simulations, TeamRankings computer projections, Covers, and BettingPros sharp/public splits.
-       - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)" or "No (Split: FanGraphs on NYY 52% vs BallparkPal on BAL 54%)").
+    5. MULTI-SOURCE CONSENSUS (COLUMN 15):
+       - Cross-reference projections from FanGraphs, Ballpark Pal, TeamRankings, Covers, and BettingPros.
+       - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)").
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
@@ -796,21 +827,6 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
 
     STRICT SPORTSBOOK CONSTRAINTS:
     - Place bets ONLY on: 1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars.
-
-    STRICT RE-EVALUATION & SYNTHESIS RULES:
-    1. EVALUATE EXISTING OPEN PICKS:
-       For every pick listed in ACTIVE OPEN PICKS:
-       - If you agree with the current side/pick: 
-         Set "action": "VALIDATED". 
-         Provide updated "updated_odds", "updated_model_prob", "updated_expected_value", detailed "high_agreement", and updated "reason" highlighting the primary EV driver.
-         DO NOT create a duplicate entry in "new_picks".
-       - If market movement, pitching change, or deeper multi-model divergence proves the OPPOSITE side is now superior:
-         Set "action": "REJECTED" with "reason".
-         Put the NEW opposite pick into "new_picks".
-
-    2. NEW MATCHUPS:
-       - For games that have NO existing pick in ACTIVE OPEN PICKS, select the highest +EV bet and put it in "new_picks".
-       - Never recommend more than 5 total active bets across the entire slate.
 
     OUTPUT SCHEMA (STRICT JSON ONLY):
     {{
@@ -830,14 +846,13 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
         {{
           "date": "YYYY-MM-DD",
           "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)",
-          "pick": "Team Name",
-          "odds": -110,
-          "implied_prob": "52.4%",
-          "model_prob": "58.0%",
-          "expected_value": "+10.7%",
-          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "units": 1.0,
+          "bet_type": "Run Line (FanDuel)",
+          "pick": "Team Name -1.5",
+          "odds": 125,
+          "implied_prob": "44.4%",
+          "model_prob": "51.0%",
+          "expected_value": "+14.8%",
+          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: 58%, BallparkPal: 5.4-3.1, TeamRankings: 59%)>",
           "reasoning": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
         }}
       ]
@@ -883,7 +898,7 @@ def extract_canonical_teams_from_game(game_str):
     return tuple(sorted(cleaned))
 
 def game_already_pending(raw_rows, pick_date, game):
-    """Checks if there is already an active pending pick for this exact game today using canonical team names."""
+    """Checks if there is already an active pending pick for this exact game today."""
     if len(raw_rows) <= 1:
         return False
 
@@ -966,14 +981,23 @@ def main():
                 val_notes.append(f"Row {row_idx} ({action}): {reason}")
 
                 if action == "VALIDATED":
-                    if "updated_odds" in val and val["updated_odds"]:
-                        sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    updated_odds = val.get("updated_odds")
+                    updated_model_prob = val.get("updated_model_prob")
+
+                    if updated_odds:
+                        sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
                     if "updated_implied_prob" in val and val["updated_implied_prob"]:
                         sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
-                    if "updated_model_prob" in val and val["updated_model_prob"]:
-                        sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if updated_model_prob:
+                        sheet.update_cell(row_idx, 8, updated_model_prob)
                     if "updated_expected_value" in val and val["updated_expected_value"]:
                         sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    
+                    # Update Quarter-Kelly unit sizing dynamically
+                    if updated_odds and updated_model_prob:
+                        qk_units = compute_quarter_kelly_units(updated_odds, updated_model_prob)
+                        sheet.update_cell(row_idx, 10, qk_units)
+
                     if "high_agreement" in val and val["high_agreement"]:
                         sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
                     if reason:
@@ -982,7 +1006,7 @@ def main():
 
                 print(f"Row {row_idx} evaluated as {action}.")
 
-    # 6. Append Only Genuinely New / Replacement Picks
+    # 6. Append Only Genuinely New / Replacement Picks with Quarter-Kelly Sizing
     raw_rows = sheet.get_all_values()
     appended_count = 0
     skipped_count = 0
@@ -993,6 +1017,7 @@ def main():
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
         high_agree_detail = str(p.get("high_agreement", "No (Split consensus)"))
+        model_prob_str = str(p.get("model_prob", "50.0%"))
         
         try:
             odds_val = float(p.get("odds", -110))
@@ -1004,6 +1029,9 @@ def main():
             skipped_count += 1
             continue
 
+        # Dynamic Quarter-Kelly sizing
+        qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+
         sheet.append_row([
             pick_date,
             current_time_str,
@@ -1012,9 +1040,9 @@ def main():
             pick,
             int(round(odds_val)),
             p.get("implied_prob", ""),
-            p.get("model_prob", ""),
+            model_prob_str,
             p.get("expected_value", ""),
-            p.get("units", 1.0),
+            qk_units,
             "PENDING",
             0.0,
             p.get("reasoning", ""),
