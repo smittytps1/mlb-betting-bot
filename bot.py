@@ -965,6 +965,33 @@ def game_already_pending(raw_rows, pick_date, game):
 
     return False
 
+# --- 10. HARD PYTHON HALLUCINATION GUARDRAIL ---
+def check_for_hallucinated_pitchers(game_str, reasoning_str, probable_pitchers):
+    """
+    Cross-references the reasoning string against the global probable_pitchers dictionary.
+    If a foreign starting pitcher's name is found in the reasoning, it returns False.
+    """
+    try:
+        parts = game_str.split("@")
+        if len(parts) != 2:
+            return True
+        away_canonical = match_canonical_team(parts[0].strip())
+        home_canonical = match_canonical_team(parts[1].strip())
+        
+        for team, pitcher_info in probable_pitchers.items():
+            if team == home_canonical or team == away_canonical:
+                continue
+                
+            foreign_pitcher_name = pitcher_info.split("(")[0].strip()
+            
+            if foreign_pitcher_name and foreign_pitcher_name.upper() != "TBD" and len(foreign_pitcher_name) > 4:
+                if foreign_pitcher_name in reasoning_str:
+                    print(f"  [GUARDRAIL TRIGGERED] Cross-wire detected! {foreign_pitcher_name} does not pitch in {game_str}.")
+                    return False 
+    except Exception as e:
+        print(f"Notice in guardrail validation: {e}")
+    return True
+
 # --- MAIN EXECUTION ---
 def main():
     spreadsheet, sheet = get_sheets()
@@ -1055,6 +1082,7 @@ def main():
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
+        reasoning = str(p.get("reasoning", "")).strip()
         high_agree_detail = str(p.get("high_agreement", "No (Split consensus)"))
         model_prob_str = str(p.get("model_prob", "50.0%"))
         
@@ -1067,6 +1095,13 @@ def main():
             print(f"Skipping duplicate game prediction: {game} | {pick}")
             skipped_count += 1
             continue
+            
+        # --- THE HALLUCINATION GUARDRAIL ---
+        is_valid_reasoning = check_for_hallucinated_pitchers(game, reasoning, probable_pitchers)
+        if not is_valid_reasoning:
+            skipped_count += 1
+            continue
+        # -----------------------------------
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
@@ -1083,13 +1118,13 @@ def main():
             qk_units,
             "PENDING",
             0.0,
-            p.get("reasoning", ""),
+            reasoning,
             "NEW",
             high_agree_detail
         ])
         appended_count += 1
 
-    print(f"MLB Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed.")
+    print(f"MLB Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed. Skipped/Blocked: {skipped_count}")
 
 if __name__ == "__main__":
     main()
