@@ -79,7 +79,7 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         q = 1.0 - p
 
         kelly = (b * p - q) / b
-        quarter_kelly = (kelly * 0.25) * 10.0 # Scale to standard 1.0 unit baseline
+        quarter_kelly = (kelly * 0.25) * 10.0
         return max(0.5, min(2.0, round(quarter_kelly, 2)))
     except Exception:
         return 1.0
@@ -179,7 +179,6 @@ def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     
-    # 1. Primary Ingestion: ESPN MLB Scoreboard API
     try:
         date_clean = target_date_str.replace("-", "")
         espn_url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={date_clean}"
@@ -227,7 +226,6 @@ def fetch_today_probable_pitchers(target_date_str):
     except Exception as e:
         print(f"Notice during ESPN probables fetch: {e}")
 
-    # 2. Secondary Fallback: MLB Stats API
     try:
         mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
         mlb_resp = requests.get(mlb_url, headers=headers, timeout=10)
@@ -538,7 +536,7 @@ def load_memory():
         "net_profit_dollars": 0.0,
         "high_agreement_yes_performance": {"wins": 0, "losses": 0, "win_rate": "0%", "profit": 0.0},
         "high_agreement_no_performance": {"wins": 0, "losses": 0, "win_rate": "0%", "profit": 0.0},
-        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation across FanGraphs, Statcast, Ballpark Pal, and multi-model consensus synthesis.",
+        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation across FanGraphs, Statcast, Ballpark Pal, and sharp market synthesis.",
         "reasoning_factor_weights": {
             "starting_pitcher_expected_metrics": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
@@ -558,7 +556,7 @@ def load_memory():
             },
             "multi_source_consensus_and_divergence": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
-                "instruction": "Evaluate multi-model alignment across FanGraphs, Ballpark Pal, TeamRankings, Covers, and sharp money splits."
+                "instruction": "Evaluate multi-model alignment or sharp market divergence across FanGraphs, Ballpark Pal, TeamRankings, and sharp money splits."
             },
             "bullpen_depth_and_fatigue": {
                 "wins": 0, "losses": 0, "weight": 1.0, 
@@ -619,7 +617,7 @@ def update_memory_from_sheet(sheet, memory):
             "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup", "rest day", "handedness", "splits"],
             "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg", "babip", "savant", "exit velocity"],
             "ballpark_and_weather_simulation": ["ballpark pal", "park factor", "wind", "air density", "temperature", "humidity", "weather", "altitude", "coors", "roof"],
-            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs", "ballpark pal", "model agreement", "split projection", "divergence", "sharp split", "high agreement"],
+            "multi_source_consensus_and_divergence": ["consensus", "teamrankings", "covers", "bettingpros", "fangraphs", "ballpark pal", "model agreement", "split projection", "divergence", "sharp split", "high agreement", "sharp divergence", "contrarian"],
             "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "3-day", "fatigue", "rosterresource", "middle relief", "high-leverage", "pitch count", "boxscore", "burned"],
             "umpire_and_situational_fatigue": ["umpire", "strike zone", "tight zone", "generous zone", "getaway day", "travel", "night-to-day", "schedule fatigue"]
         }
@@ -761,7 +759,7 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 8. GENERATE PICKS VIA GEMINI WITH AUDIT-OPTIMIZED FILTERING ---
+# --- 8. GENERATE PICKS VIA GEMINI WITH CONTRARIAN & MARKET-BALANCED LOGIC ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -775,283 +773,4 @@ def parse_json_from_response(response):
     json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
     if json_match:
         return json.loads(json_match.group(0))
-    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean_text)
-
-def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
-    print("Sending MLB odds data, confirmed pitchers, and audit-optimized prompt to Gemini...")
-    api_key = os.environ.get("GEMINI_API_KEY")
-    client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-    You are an elite quantitative MLB betting engine executing deep multi-variable synthesis and risk-adjusted bankroll management.
-
-    === RECURSIVE MEMORY & EMPIRICAL PERFORMANCE REFLECTION ===
-    {json.dumps(memory, indent=2)}
-
-    === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
-    {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
-
-    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL ESPN & MLB FEEDS) ===
-    {json.dumps(probable_pitchers, indent=2)}
-
-    === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
-    {json.dumps(bullpen_logs, indent=2)}
-
-    CRITICAL AUDIT-OPTIMIZED RULES & MATHEMATICAL CONSTRAINTS:
-    1. MARKET DIVERSIFICATION (AVOID MONEYLINE OVER-EXPOSURE):
-       - Historical audit proves Run Lines (+1.5/-1.5) and Totals (Over/Under) have a 75-100% win rate, while full-game Moneylines have underperformed.
-       - Actively explore Run Lines (+1.5 / -1.5) and Game Totals (Over/Under) whenever starting pitching command and park factors create clear variance advantages.
-       - Recommend no more than 2 full-game Moneylines per slate.
-
-    2. UNDERDOG SHRINKAGE & HIGHER EV THRESHOLDS:
-       - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV and unanimous multi-source consensus.
-       - Never inflate underdog model win probabilities more than +3.5% above market implied probability.
-
-    3. DYNAMIC PRIMARY-DRIVER REASONING:
-       - In your reasoning summary, isolate ONLY the 1-3 primary factors that created the EV edge (e.g. Starter Strikeout/Command Mismatch, Platoon wRC+ Split, or Weather/Park Factor Dynamics). Do NOT use generic boilerplate checklists.
-
-    4. STRICT GROUND-TRUTH FACTUAL RIGOR:
-       - Only reference the confirmed starting pitchers provided above. Never invert pitcher metrics or invent players who do not pitch for that team.
-       - Never claim a team had an 'off-day' if the bullpen logs show they pitched yesterday.
-
-    5. MULTI-SOURCE CONSENSUS (COLUMN 15):
-       - Cross-reference projections from FanGraphs, Ballpark Pal, TeamRankings, Covers, and BettingPros.
-       - In "high_agreement", explicitly state the model names and simulated values (e.g. "Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)").
-
-    === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
-    {json.dumps(open_picks, indent=2)}
-
-    === TODAY'S LIVE ODDS DATA ===
-    {json.dumps(odds_data[:8])}
-
-    STRICT SPORTSBOOK CONSTRAINTS:
-    - Place bets ONLY on: 1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars.
-
-    OUTPUT SCHEMA (STRICT JSON ONLY):
-    {{
-      "validations": [
-        {{
-          "row_index": <int matching row_index in open_picks>,
-          "action": "VALIDATED" or "REJECTED",
-          "updated_odds": <int or float, e.g. -110>,
-          "updated_implied_prob": "52.4%",
-          "updated_model_prob": "58.0%",
-          "updated_expected_value": "+10.7%",
-          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: PHI 62%, BallparkPal: PHI 5.8-3.2, TeamRankings: 64%)>",
-          "reason": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
-        }}
-      ],
-      "new_picks": [
-        {{
-          "date": "YYYY-MM-DD",
-          "game": "Away Team @ Home Team",
-          "bet_type": "Run Line (FanDuel)",
-          "pick": "Team Name -1.5",
-          "odds": 125,
-          "implied_prob": "44.4%",
-          "model_prob": "51.0%",
-          "expected_value": "+14.8%",
-          "high_agreement": "<Specific source breakdown, e.g. Yes (FanGraphs: 58%, BallparkPal: 5.4-3.1, TeamRankings: 59%)>",
-          "reasoning": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
-        }}
-      ]
-    }}
-    """
-
-    candidate_models = [
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-pro-preview"
-    ]
-
-    for model_name in candidate_models:
-        for attempt in range(2):
-            try:
-                print(f"Attempting pick synthesis with model: {model_name}...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                return parse_json_from_response(response)
-
-            except errors.ClientError as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    time.sleep(5)
-                elif "404" in str(e):
-                    print(f"Model {model_name} returned 404, falling back to next model...")
-                    break
-                else:
-                    print(f"Gemini API Error with {model_name}: {e}")
-                    break
-            except Exception as e:
-                print(f"Error during pick generation with {model_name}: {e}")
-                break
-
-    return {"validations": [], "new_picks": []}
-
-# --- 9. GAME-LEVEL DEDUPLICATION HELPER ---
-def extract_canonical_teams_from_game(game_str):
-    parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
-    cleaned = [match_canonical_team(p) for p in parts if p.strip()]
-    return tuple(sorted(cleaned))
-
-def game_already_pending(raw_rows, pick_date, game):
-    """Checks if there is already an active pending pick for this exact game today."""
-    if len(raw_rows) <= 1:
-        return False
-
-    headers = [h.strip() for h in raw_rows[0]]
-    try:
-        date_col = headers.index("Date")
-        game_col = headers.index("Game")
-        status_col = headers.index("Status")
-    except ValueError:
-        return False
-
-    norm_teams = extract_canonical_teams_from_game(game)
-
-    for r in raw_rows[1:]:
-        if len(r) <= max(date_col, game_col, status_col):
-            continue
-
-        r_date = str(r[date_col]).strip()
-        r_teams = extract_canonical_teams_from_game(r[game_col])
-        r_status = str(r[status_col]).strip().upper()
-
-        if r_date == pick_date and r_teams == norm_teams and r_status == "PENDING":
-            return True
-
-    return False
-
-# --- MAIN EXECUTION ---
-def main():
-    spreadsheet, sheet = get_sheets()
-    ensure_headers(sheet)
-    ensure_evolution_sheet(spreadsheet)
-
-    odds_key = os.environ.get("ODDS_API_KEY")
-    graded_count = 0
-    if odds_key:
-        graded_count = auto_grade_pending_bets(sheet, odds_key)
-
-    update_scoreboard(spreadsheet)
-
-    memory = load_memory()
-    updated_memory = update_memory_from_sheet(sheet, memory)
-    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
-
-    print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
-
-    update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
-
-    # 1. Fetch Confirmed Probable Pitchers directly from ESPN & MLB Feeds
-    probable_pitchers = fetch_today_probable_pitchers(today_date_str)
-
-    # 2. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
-    bullpen_logs = fetch_recent_bullpen_usage(days_back=2)
-
-    # 3. Fetch Live Odds
-    odds = fetch_mlb_odds(odds_key)
-    if not odds:
-        print("WARNING: No live MLB odds returned. Completed grading and evolution log.")
-        return
-
-    # 4. Process Re-Evaluations and New Picks
-    open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, bullpen_logs, probable_pitchers)
-
-    validations = ai_response.get("validations", [])
-    new_picks = ai_response.get("new_picks", [])
-
-    val_notes = []
-    
-    # 5. Process Validations & In-Place Updates on Existing Rows
-    if validations:
-        print(f"Processing {len(validations)} pick validation update(s)...")
-        for val in validations:
-            row_idx = val.get("row_index")
-            action = str(val.get("action", "")).strip().upper()
-            reason = str(val.get("reason", "")).strip()
-
-            if row_idx and action in ["VALIDATED", "REJECTED"]:
-                sheet.update_cell(row_idx, 14, action)
-                val_notes.append(f"Row {row_idx} ({action}): {reason}")
-
-                if action == "VALIDATED":
-                    updated_odds = val.get("updated_odds")
-                    updated_model_prob = val.get("updated_model_prob")
-
-                    if updated_odds:
-                        sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
-                    if "updated_implied_prob" in val and val["updated_implied_prob"]:
-                        sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
-                    if updated_model_prob:
-                        sheet.update_cell(row_idx, 8, updated_model_prob)
-                    if "updated_expected_value" in val and val["updated_expected_value"]:
-                        sheet.update_cell(row_idx, 9, val["updated_expected_value"])
-                    
-                    # Update Quarter-Kelly unit sizing dynamically
-                    if updated_odds and updated_model_prob:
-                        qk_units = compute_quarter_kelly_units(updated_odds, updated_model_prob)
-                        sheet.update_cell(row_idx, 10, qk_units)
-
-                    if "high_agreement" in val and val["high_agreement"]:
-                        sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
-                    if reason:
-                        sheet.update_cell(row_idx, 13, reason)
-                    sheet.update_cell(row_idx, 2, current_time_str)
-
-                print(f"Row {row_idx} evaluated as {action}.")
-
-    # 6. Append Only Genuinely New / Replacement Picks with Quarter-Kelly Sizing
-    raw_rows = sheet.get_all_values()
-    appended_count = 0
-    skipped_count = 0
-
-    for p in new_picks:
-        pick_date = str(p.get("date", today_date_str)).strip()
-        game = str(p.get("game", "")).strip()
-        bet_type = str(p.get("bet_type", "")).strip()
-        pick = str(p.get("pick", "")).strip()
-        high_agree_detail = str(p.get("high_agreement", "No (Split consensus)"))
-        model_prob_str = str(p.get("model_prob", "50.0%"))
-        
-        try:
-            odds_val = float(p.get("odds", -110))
-        except (ValueError, TypeError):
-            odds_val = -110.0
-
-        if game_already_pending(raw_rows, pick_date, game):
-            print(f"Skipping duplicate game prediction: {game} | {pick}")
-            skipped_count += 1
-            continue
-
-        # Dynamic Quarter-Kelly sizing
-        qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
-
-        sheet.append_row([
-            pick_date,
-            current_time_str,
-            game,
-            bet_type,
-            pick,
-            int(round(odds_val)),
-            p.get("implied_prob", ""),
-            model_prob_str,
-            p.get("expected_value", ""),
-            qk_units,
-            "PENDING",
-            0.0,
-            p.get("reasoning", ""),
-            "NEW",
-            high_agree_detail
-        ])
-        appended_count += 1
-
-    print(f"MLB Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed.")
-
-if __name__ == "__main__":
-    main()
+    clean_text = raw_text.replace("```json", "").replace("
