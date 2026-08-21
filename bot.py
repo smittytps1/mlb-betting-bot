@@ -773,4 +773,288 @@ def parse_json_from_response(response):
     json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
     if json_match:
         return json.loads(json_match.group(0))
-    clean_text = raw_text.replace("```json", "").replace("
+        
+    # Safely strip markdown formatting without breaking syntax during copy/paste
+    marker = "`" * 3
+    clean_text = raw_text.replace(f"{marker}json", "").replace(marker, "").strip()
+    return json.loads(clean_text)
+
+def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
+    print("Sending MLB odds data, confirmed pitchers, and contrarian-aware prompt to Gemini...")
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+    You are an elite quantitative MLB betting engine executing deep multi-variable synthesis and risk-adjusted bankroll management.
+
+    === RECURSIVE MEMORY & EMPIRICAL PERFORMANCE REFLECTION ===
+    {json.dumps(memory, indent=2)}
+
+    === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
+    {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
+
+    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL ESPN & MLB FEEDS) ===
+    {json.dumps(probable_pitchers, indent=2)}
+
+    === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
+    {json.dumps(bullpen_logs, indent=2)}
+
+    CRITICAL MARKET RULES & SLATE CONSTRAINTS:
+    1. MARKET SELECTION:
+       - Supported full-game bet types: Moneyline, Run Line (+1.5 / -1.5), and Game Totals (Over / Under).
+       - You may recommend multiple Game Totals (Over/Under) if the quantitative edge (+EV) and environmental factors support it. There is no restriction on the number of totals.
+       - Balance your selections across Moneylines, Run Lines, and Totals where starting pitcher predictive metrics (xFIP/SIERA) create true structural edges.
+
+    2. BALANCED SEARCH (CONSENSUS & SHARP CONTRARIAN DIVERGENCE):
+       - DO NOT exclusively wait for 100% unanimous public consensus! Unanimous consensus often means the market has priced out all remaining value.
+       - Actively hunt for SHARP CONTRARIAN DIVERGENCE: Spots where surface-level stats (e.g. high recent ERA or public team bias) create an artificially discounted line, while advanced Statcast metrics (low xERA, high K-BB%, elite Stuff+) point to significant positive regression.
+       - In Column 15 Output ("high_agreement"):
+         * If unanimous: "Yes (FanGraphs: 62%, BallparkPal: 5.4-3.1, TeamRankings: 63%)"
+         * If sharp contrarian/divergent: "Sharp Divergence (Model on PHI 58% vs Market 48% due to xERA/K-BB% mismatch)"
+         * If split: "No (Split: FanGraphs on X vs BallparkPal on Y)"
+
+    3. UNDERDOG SHRINKAGE & VALUE DISCIPLINE:
+       - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV to account for variance.
+       - Cap underdog model win probability projections at a maximum of +3.5% above market implied odds.
+
+    4. DYNAMIC PRIMARY-DRIVER REASONING:
+       - Focus your reasoning summary ONLY on the 1-3 specific primary factors that generated the EV edge for that matchup. Do not write formulaic checklists.
+
+    5. STRICT FACTUAL RIGOR:
+       - Only reference confirmed starting pitchers provided above. Never invert pitcher skill profiles or invent players who do not pitch for that team.
+       - Never claim a team had an 'off-day' if the bullpen logs show they pitched yesterday.
+
+    === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
+    {json.dumps(open_picks, indent=2)}
+
+    === TODAY'S LIVE ODDS DATA ===
+    {json.dumps(odds_data[:8])}
+
+    STRICT SPORTSBOOK CONSTRAINTS:
+    - Place bets ONLY on: 1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars.
+
+    OUTPUT SCHEMA (STRICT JSON ONLY):
+    {{
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float, e.g. -110>,
+          "updated_implied_prob": "52.4%",
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+10.7%",
+          "high_agreement": "<Specific consensus or divergence breakdown, e.g. Sharp Divergence (Model on PHI 58% vs Market 48% due to xERA mismatch)>",
+          "reason": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
+        }}
+      ],
+      "new_picks": [
+        {{
+          "date": "YYYY-MM-DD",
+          "game": "Away Team @ Home Team",
+          "bet_type": "Moneyline (FanDuel)",
+          "pick": "Team Name",
+          "odds": -110,
+          "implied_prob": "52.4%",
+          "model_prob": "58.0%",
+          "expected_value": "+10.7%",
+          "high_agreement": "<Specific consensus or divergence breakdown, e.g. Yes (FanGraphs: 62%, BallparkPal: 5.4-3.1)>",
+          "reasoning": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
+        }}
+      ]
+    }}
+    """
+
+    candidate_models = [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview"
+    ]
+
+    for model_name in candidate_models:
+        for attempt in range(2):
+            try:
+                print(f"Attempting pick synthesis with model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                return parse_json_from_response(response)
+
+            except errors.ClientError as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    time.sleep(5)
+                elif "404" in str(e):
+                    print(f"Model {model_name} returned 404, falling back to next model...")
+                    break
+                else:
+                    print(f"Gemini API Error with {model_name}: {e}")
+                    break
+            except Exception as e:
+                print(f"Error during pick generation with {model_name}: {e}")
+                break
+
+    return {"validations": [], "new_picks": []}
+
+# --- 9. GAME-LEVEL DEDUPLICATION HELPER ---
+def extract_canonical_teams_from_game(game_str):
+    parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
+    cleaned = [match_canonical_team(p) for p in parts if p.strip()]
+    return tuple(sorted(cleaned))
+
+def game_already_pending(raw_rows, pick_date, game):
+    """Checks if there is already an active pending pick for this exact game today."""
+    if len(raw_rows) <= 1:
+        return False
+
+    headers = [h.strip() for h in raw_rows[0]]
+    try:
+        date_col = headers.index("Date")
+        game_col = headers.index("Game")
+        status_col = headers.index("Status")
+    except ValueError:
+        return False
+
+    norm_teams = extract_canonical_teams_from_game(game)
+
+    for r in raw_rows[1:]:
+        if len(r) <= max(date_col, game_col, status_col):
+            continue
+
+        r_date = str(r[date_col]).strip()
+        r_teams = extract_canonical_teams_from_game(r[game_col])
+        r_status = str(r[status_col]).strip().upper()
+
+        if r_date == pick_date and r_teams == norm_teams and r_status == "PENDING":
+            return True
+
+    return False
+
+# --- MAIN EXECUTION ---
+def main():
+    spreadsheet, sheet = get_sheets()
+    ensure_headers(sheet)
+    ensure_evolution_sheet(spreadsheet)
+
+    odds_key = os.environ.get("ODDS_API_KEY")
+    graded_count = 0
+    if odds_key:
+        graded_count = auto_grade_pending_bets(sheet, odds_key)
+
+    update_scoreboard(spreadsheet)
+
+    memory = load_memory()
+    updated_memory = update_memory_from_sheet(sheet, memory)
+    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+
+    print(f"Memory Loaded | Total Bets: {updated_memory['total_bets']} | Win Rate: {updated_memory['win_rate']}")
+
+    update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bet(s). Evaluating live board.", current_time_str)
+
+    # 1. Fetch Confirmed Probable Pitchers directly from ESPN & MLB Feeds
+    probable_pitchers = fetch_today_probable_pitchers(today_date_str)
+
+    # 2. Fetch Real Bullpen Usage directly by gamePk from Official MLB API
+    bullpen_logs = fetch_recent_bullpen_usage(days_back=2)
+
+    # 3. Fetch Live Odds
+    odds = fetch_mlb_odds(odds_key)
+    if not odds:
+        print("WARNING: No live MLB odds returned. Completed grading and evolution log.")
+        return
+
+    # 4. Process Re-Evaluations and New Picks
+    open_picks = get_today_existing_picks(sheet, today_date_str)
+    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, bullpen_logs, probable_pitchers)
+
+    validations = ai_response.get("validations", [])
+    new_picks = ai_response.get("new_picks", [])
+
+    val_notes = []
+    
+    # 5. Process Validations & In-Place Updates on Existing Rows
+    if validations:
+        print(f"Processing {len(validations)} pick validation update(s)...")
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            reason = str(val.get("reason", "")).strip()
+
+            if row_idx and action in ["VALIDATED", "REJECTED"]:
+                sheet.update_cell(row_idx, 14, action)
+                val_notes.append(f"Row {row_idx} ({action}): {reason}")
+
+                if action == "VALIDATED":
+                    updated_odds = val.get("updated_odds")
+                    updated_model_prob = val.get("updated_model_prob")
+
+                    if updated_odds:
+                        sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
+                    if "updated_implied_prob" in val and val["updated_implied_prob"]:
+                        sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
+                    if updated_model_prob:
+                        sheet.update_cell(row_idx, 8, updated_model_prob)
+                    if "updated_expected_value" in val and val["updated_expected_value"]:
+                        sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    
+                    if updated_odds and updated_model_prob:
+                        qk_units = compute_quarter_kelly_units(updated_odds, updated_model_prob)
+                        sheet.update_cell(row_idx, 10, qk_units)
+
+                    if "high_agreement" in val and val["high_agreement"]:
+                        sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
+                    if reason:
+                        sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+
+                print(f"Row {row_idx} evaluated as {action}.")
+
+    # 6. Append Only Genuinely New / Replacement Picks with Quarter-Kelly Sizing
+    raw_rows = sheet.get_all_values()
+    appended_count = 0
+    skipped_count = 0
+
+    for p in new_picks:
+        pick_date = str(p.get("date", today_date_str)).strip()
+        game = str(p.get("game", "")).strip()
+        bet_type = str(p.get("bet_type", "")).strip()
+        pick = str(p.get("pick", "")).strip()
+        high_agree_detail = str(p.get("high_agreement", "No (Split consensus)"))
+        model_prob_str = str(p.get("model_prob", "50.0%"))
+        
+        try:
+            odds_val = float(p.get("odds", -110))
+        except (ValueError, TypeError):
+            odds_val = -110.0
+
+        if game_already_pending(raw_rows, pick_date, game):
+            print(f"Skipping duplicate game prediction: {game} | {pick}")
+            skipped_count += 1
+            continue
+
+        qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+
+        sheet.append_row([
+            pick_date,
+            current_time_str,
+            game,
+            bet_type,
+            pick,
+            int(round(odds_val)),
+            p.get("implied_prob", ""),
+            model_prob_str,
+            p.get("expected_value", ""),
+            qk_units,
+            "PENDING",
+            0.0,
+            p.get("reasoning", ""),
+            "NEW",
+            high_agree_detail
+        ])
+        appended_count += 1
+
+    print(f"MLB Execution Complete: {appended_count} new pick(s) added, {len(validations)} validation(s) processed.")
+
+if __name__ == "__main__":
+    main()
