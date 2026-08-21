@@ -652,7 +652,7 @@ def update_memory_from_sheet(sheet, memory):
                             no_profit += pnl_val
 
                     for factor_key, kws in keywords_map.items():
-                        if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for factor_key in kws):
+                        if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for kw in kws):
                             if factor_key not in factors:
                                 factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
                             if status == "WIN":
@@ -760,24 +760,36 @@ def get_today_existing_picks(sheet, today_date_str):
     return existing
 
 def format_matchups_with_pitchers(odds_data, probable_pitchers):
-    """Binds confirmed starting pitchers directly onto each game object to eliminate cross-wiring."""
-    stamped_games = []
+    """Binds confirmed starting pitchers directly onto each game object. 
+    Aggressively drops any game where a starter is TBD to eliminate hallucinations."""
+    valid_stamped_games = []
+    dropped_games = []
+    
     for game in odds_data:
         home_raw = game.get("home_team", "")
         away_raw = game.get("away_team", "")
         home_canonical = match_canonical_team(home_raw)
         away_canonical = match_canonical_team(away_raw)
 
-        away_starter = probable_pitchers.get(away_canonical, "TBD (No Confirmed Starter - Do NOT guess a name)")
-        home_starter = probable_pitchers.get(home_canonical, "TBD (No Confirmed Starter - Do NOT guess a name)")
+        away_starter = probable_pitchers.get(away_canonical, "TBD")
+        home_starter = probable_pitchers.get(home_canonical, "TBD")
+
+        # THE PYTHON NUKE: If either team's starter is TBD, drop the game entirely
+        if "TBD" in away_starter or "TBD" in home_starter:
+            dropped_games.append(f"{away_canonical} @ {home_canonical}")
+            continue
 
         game_copy = dict(game)
         game_copy["matchup_pitching_context"] = {
-            "away_team": f"{away_canonical} -> Starter: {away_starter}",
-            "home_team": f"{home_canonical} -> Starter: {home_starter}"
+            "away_team": f"{away_canonical} -> Confirmed Starter: {away_starter}",
+            "home_team": f"{home_canonical} -> Confirmed Starter: {home_starter}"
         }
-        stamped_games.append(game_copy)
-    return stamped_games
+        valid_stamped_games.append(game_copy)
+        
+    if dropped_games:
+        print(f"  [Python Guardrail] Nuked {len(dropped_games)} games from prompt due to TBD starters: {', '.join(dropped_games)}")
+        
+    return valid_stamped_games
 
 # --- 8. GENERATE PICKS VIA GEMINI WITH CONTRARIAN & ANTI-HALLUCINATION LOGIC ---
 def parse_json_from_response(response):
@@ -805,6 +817,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     client = genai.Client(api_key=api_key)
 
     formatted_games = format_matchups_with_pitchers(odds_data[:8], probable_pitchers)
+    
+    if not formatted_games:
+        print("WARNING: All target games were nuked due to TBD starters. Skipping Gemini generation.")
+        return {"validations": [], "new_picks": []}
 
     prompt = f"""
     You are an elite quantitative MLB betting engine executing deep multi-variable synthesis and risk-adjusted bankroll management.
@@ -821,10 +837,9 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     === TODAY'S LIVE MATCHUPS & CONFIRMED STARTING PITCHERS ===
     {json.dumps(formatted_games, indent=2)}
 
-    STRICT ANTI-HALLUCINATION & PITCHER GROUNDING RULES (ZERO TOLERANCE):
+    STRICT ANTI-HALLUCINATION & PITCHER GROUNDING RULES:
     1. NEVER INVENT OR SWAP PITCHERS:
        - You MUST ONLY use the exact starting pitcher explicitly stamped under "matchup_pitching_context" for that specific team.
-       - If a starter is listed as "TBD" or "No Confirmed Starter", you are STRICTLY FORBIDDEN from naming any pitcher for that team. You must evaluate the matchup strictly on lineup platoon baselines or bullpen depth, or simply pass on the game.
        - Do not cross-wire pitchers. If Pitcher X is assigned to Team A, do not write a reason saying Pitcher X is pitching for Team B.
 
     2. MARKET SELECTION:
