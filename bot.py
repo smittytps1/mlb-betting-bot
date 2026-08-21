@@ -652,7 +652,7 @@ def update_memory_from_sheet(sheet, memory):
                             no_profit += pnl_val
 
                     for factor_key, kws in keywords_map.items():
-                        if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for kw in kws):
+                        if factor_key != "multi_source_consensus_and_divergence" and any(kw in reasoning for factor_key in kws):
                             if factor_key not in factors:
                                 factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
                             if status == "WIN":
@@ -717,7 +717,7 @@ def update_memory_from_sheet(sheet, memory):
 
     return memory
 
-# --- 7. FETCH MLB ODDS & GET TODAY'S OPEN PICKS ---
+# --- 7. FETCH MLB ODDS & FORMAT MATCHUPS ---
 def fetch_mlb_odds(odds_key):
     url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
     print("Fetching live MLB odds...")
@@ -759,7 +759,27 @@ def get_today_existing_picks(sheet, today_date_str):
                 })
     return existing
 
-# --- 8. GENERATE PICKS VIA GEMINI WITH CONTRARIAN & MARKET-BALANCED LOGIC ---
+def format_matchups_with_pitchers(odds_data, probable_pitchers):
+    """Binds confirmed starting pitchers directly onto each game object to eliminate cross-wiring."""
+    stamped_games = []
+    for game in odds_data:
+        home_raw = game.get("home_team", "")
+        away_raw = game.get("away_team", "")
+        home_canonical = match_canonical_team(home_raw)
+        away_canonical = match_canonical_team(away_raw)
+
+        away_starter = probable_pitchers.get(away_canonical, "TBD (No Confirmed Starter - Do NOT guess a name)")
+        home_starter = probable_pitchers.get(home_canonical, "TBD (No Confirmed Starter - Do NOT guess a name)")
+
+        game_copy = dict(game)
+        game_copy["matchup_pitching_context"] = {
+            "away_team": f"{away_canonical} -> Starter: {away_starter}",
+            "home_team": f"{home_canonical} -> Starter: {home_starter}"
+        }
+        stamped_games.append(game_copy)
+    return stamped_games
+
+# --- 8. GENERATE PICKS VIA GEMINI WITH CONTRARIAN & ANTI-HALLUCINATION LOGIC ---
 def parse_json_from_response(response):
     """Robust extractor for JSON responses from GenAI models."""
     raw_text = ""
@@ -780,9 +800,11 @@ def parse_json_from_response(response):
     return json.loads(clean_text)
 
 def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, probable_pitchers):
-    print("Sending MLB odds data, confirmed pitchers, and contrarian-aware prompt to Gemini...")
+    print("Sending MLB odds data, confirmed pitchers, and anti-hallucination constraints to Gemini...")
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
+
+    formatted_games = format_matchups_with_pitchers(odds_data[:8], probable_pitchers)
 
     prompt = f"""
     You are an elite quantitative MLB betting engine executing deep multi-variable synthesis and risk-adjusted bankroll management.
@@ -793,42 +815,40 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
     === REASONING FACTOR WEIGHTS (DYNAMIC LESSONS FROM GRADED OUTCOMES) ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
-    === TODAY'S CONFIRMED STARTING PITCHERS (OFFICIAL ESPN & MLB FEEDS) ===
-    {json.dumps(probable_pitchers, indent=2)}
-
     === RECENT OFFICIAL MLB BULLPEN USAGE CONTEXT (LAST 48 HOURS) ===
     {json.dumps(bullpen_logs, indent=2)}
 
-    CRITICAL MARKET RULES & SLATE CONSTRAINTS:
-    1. MARKET SELECTION:
+    === TODAY'S LIVE MATCHUPS & CONFIRMED STARTING PITCHERS ===
+    {json.dumps(formatted_games, indent=2)}
+
+    STRICT ANTI-HALLUCINATION & PITCHER GROUNDING RULES (ZERO TOLERANCE):
+    1. NEVER INVENT OR SWAP PITCHERS:
+       - You MUST ONLY use the exact starting pitcher explicitly stamped under "matchup_pitching_context" for that specific team.
+       - If a starter is listed as "TBD" or "No Confirmed Starter", you are STRICTLY FORBIDDEN from naming any pitcher for that team. You must evaluate the matchup strictly on lineup platoon baselines or bullpen depth, or simply pass on the game.
+       - Do not cross-wire pitchers. If Pitcher X is assigned to Team A, do not write a reason saying Pitcher X is pitching for Team B.
+
+    2. MARKET SELECTION:
        - Supported full-game bet types: Moneyline, Run Line (+1.5 / -1.5), and Game Totals (Over / Under).
        - You may recommend multiple Game Totals (Over/Under) if the quantitative edge (+EV) and environmental factors support it. There is no restriction on the number of totals.
-       - Balance your selections across Moneylines, Run Lines, and Totals where starting pitcher predictive metrics (xFIP/SIERA) create true structural edges.
+       - Balance your selections across Moneylines, Run Lines, and Totals where verified pitching metrics create structural edges.
 
-    2. BALANCED SEARCH (CONSENSUS & SHARP CONTRARIAN DIVERGENCE):
+    3. BALANCED SEARCH (CONSENSUS & SHARP CONTRARIAN DIVERGENCE):
        - DO NOT exclusively wait for 100% unanimous public consensus! Unanimous consensus often means the market has priced out all remaining value.
-       - Actively hunt for SHARP CONTRARIAN DIVERGENCE: Spots where surface-level stats (e.g. high recent ERA or public team bias) create an artificially discounted line, while advanced Statcast metrics (low xERA, high K-BB%, elite Stuff+) point to significant positive regression.
+       - Actively hunt for SHARP CONTRARIAN DIVERGENCE: Spots where surface-level stats create an artificially discounted line, while advanced Statcast metrics (low xERA, high K-BB%, elite Stuff+) point to significant positive regression.
        - In Column 15 Output ("high_agreement"):
          * If unanimous: "Yes (FanGraphs: 62%, BallparkPal: 5.4-3.1, TeamRankings: 63%)"
          * If sharp contrarian/divergent: "Sharp Divergence (Model on PHI 58% vs Market 48% due to xERA/K-BB% mismatch)"
          * If split: "No (Split: FanGraphs on X vs BallparkPal on Y)"
 
-    3. UNDERDOG SHRINKAGE & VALUE DISCIPLINE:
+    4. UNDERDOG SHRINKAGE & VALUE DISCIPLINE:
        - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV to account for variance.
        - Cap underdog model win probability projections at a maximum of +3.5% above market implied odds.
 
-    4. DYNAMIC PRIMARY-DRIVER REASONING:
-       - Focus your reasoning summary ONLY on the 1-3 specific primary factors that generated the EV edge for that matchup. Do not write formulaic checklists.
-
-    5. STRICT FACTUAL RIGOR:
-       - Only reference confirmed starting pitchers provided above. Never invert pitcher skill profiles or invent players who do not pitch for that team.
-       - Never claim a team had an 'off-day' if the bullpen logs show they pitched yesterday.
+    5. DYNAMIC PRIMARY-DRIVER REASONING:
+       - Focus your reasoning summary ONLY on the 1-3 specific primary factors that generated the EV edge for that matchup.
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
-
-    === TODAY'S LIVE ODDS DATA ===
-    {json.dumps(odds_data[:8])}
 
     STRICT SPORTSBOOK CONSTRAINTS:
     - Place bets ONLY on: 1. FanDuel, 2. DraftKings, 3. BetMGM, 4. Caesars.
@@ -843,8 +863,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
           "updated_implied_prob": "52.4%",
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+10.7%",
-          "high_agreement": "<Specific consensus or divergence breakdown, e.g. Sharp Divergence (Model on PHI 58% vs Market 48% due to xERA mismatch)>",
-          "reason": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
+          "high_agreement": "<Specific consensus or divergence breakdown>",
+          "reason": "<tight summary highlighting the specific 1-3 primary drivers>"
         }}
       ],
       "new_picks": [
@@ -857,8 +877,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
           "implied_prob": "52.4%",
           "model_prob": "58.0%",
           "expected_value": "+10.7%",
-          "high_agreement": "<Specific consensus or divergence breakdown, e.g. Yes (FanGraphs: 62%, BallparkPal: 5.4-3.1)>",
-          "reasoning": "<tight summary highlighting the specific 1-3 primary drivers that created the EV edge>"
+          "high_agreement": "<Specific consensus or divergence breakdown>",
+          "reasoning": "<tight summary highlighting the specific 1-3 primary drivers>"
         }}
       ]
     }}
