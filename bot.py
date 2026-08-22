@@ -334,7 +334,7 @@ def fetch_recent_bullpen_usage(days_back=2):
 
 # --- 4. ACCURATE AUTO-GRADING VIA SCORES API ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Grades PENDING bets accurately using dynamic header indexing."""
+    """Grades PENDING bets accurately using dynamic header indexing and Local Date Matcher."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1:
@@ -377,20 +377,12 @@ def auto_grade_pending_bets(sheet, odds_key):
             game_title = str(r[game_idx]).strip()
             bet_type = str(r[bet_type_idx]).strip().lower()
             pick_str = str(r[pick_idx]).strip()
-            pulled_time_raw = str(r[pulled_idx]).strip()
             
             try: odds = float(r[odds_idx])
             except (ValueError, TypeError): odds = -110.0
 
             try: units = float(r[units_idx]) if len(r) > units_idx and r[units_idx] else 1.0
             except (ValueError, TypeError): units = 1.0
-
-            pulled_dt = None
-            try:
-                clean_time = pulled_time_raw.replace(" EDT", "").replace(" EST", "").strip()
-                pulled_dt = datetime.strptime(clean_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("America/New_York"))
-            except Exception:
-                pass
 
             for match in scores_data:
                 if not match.get("completed"):
@@ -405,11 +397,17 @@ def auto_grade_pending_bets(sheet, odds_key):
 
                 if (home_canonical in game_title or away_canonical in game_title or
                     home_team in game_title or away_team in game_title):
-                    if commence_time_str and pulled_dt:
+                    
+                    # THE FIX: strict Local Date Matcher (New York timezone)
+                    if commence_time_str:
                         try:
-                            game_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
-                            if game_dt <= pulled_dt:
-                                continue
+                            game_dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
+                            game_dt_ny = game_dt_utc.astimezone(ZoneInfo("America/New_York"))
+                            game_date_ny_str = game_dt_ny.strftime("%Y-%m-%d")
+                            
+                            pick_date_str = str(r[0]).strip()
+                            if pick_date_str != game_date_ny_str:
+                                continue # Skip if the game wasn't played on the exact date in Column A
                         except Exception:
                             pass
 
@@ -787,7 +785,7 @@ def format_matchups_with_pitchers(odds_data, probable_pitchers):
         valid_stamped_games.append(game_copy)
         
     if dropped_games:
-        print(f"  [Python Guardrail] Nuked {len(dropped_games)} games from prompt due to TBD starters: {', '.join(dropped_games)}")
+        print(f"  [Python Guardrail] Nuked {len(dropped_games)} games from prompt due to TBD starters.")
         
     return valid_stamped_games
 
