@@ -856,9 +856,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
        - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV to account for variance.
        - Cap underdog model win probability projections at a maximum of +3.5% above market implied odds.
 
-    5. DYNAMIC PRIMARY-DRIVER REASONING & BULLPEN CONSTRAINT (ZERO TOLERANCE):
+    5. DYNAMIC PRIMARY-DRIVER REASONING & STRICT DATA FIDELITY (ZERO TOLERANCE):
        - Focus your reasoning summary ONLY on the 1-3 specific primary factors that generated the EV edge for that matchup.
-       - STRICT RULE: Never invent specific pitch counts or appearance totals. Use only qualitative assessments like 'heavily taxed', 'rested', or 'depleted' when evaluating bullpens. Do not mention specific numbers of relievers used or pitches thrown unless directly citing the input data.
+       - STRICT RULE: Never invent specific pitch counts or appearance totals. Use only qualitative assessments.
+       - BULLPEN FIDELITY: You are STRICTLY FORBIDDEN from calling a bullpen "taxed", "depleted", or "fatigued" unless the provided `bullpen_logs` data explicitly shows they used 4+ relievers or threw 60+ pitches in the last 48 hours. If they used 3 or fewer relievers, you MUST refer to them as "rested" or "fresh". Do not invent false narratives to justify a pick.
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
