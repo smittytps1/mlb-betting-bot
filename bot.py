@@ -72,7 +72,9 @@ def compute_quarter_kelly_units(odds, model_prob_str):
     except Exception:
         return 1.0
 
+# --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
+    print("Connecting to Google Sheets (MLB Tab)...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
@@ -83,9 +85,21 @@ def get_sheets():
 def ensure_headers(sheet):
     try:
         existing = sheet.get_all_values()
-        headers = ["Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", "Status", "P/L ($)", "Reasoning", "Validation", "High Agreement & Source Breakdown"]
-        if not existing or not existing[0] or existing[0][0] != "Date": sheet.insert_row(headers, index=1)
-    except Exception as e: print(f"Header notice: {e}")
+        headers = [
+            "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
+            "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", "Status", "P/L ($)", 
+            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time"
+        ]
+        
+        if not existing or not existing[0] or existing[0][0] != "Date": 
+            sheet.insert_row(headers, index=1)
+        else:
+            # Ensure the new Game Start Time column exists at index 16 (Column P) without shifting others
+            current_headers = existing[0]
+            if "Game Start Time" not in current_headers:
+                sheet.update_cell(1, 16, "Game Start Time")
+    except Exception as e: 
+        print(f"Header notice: {e}")
 
 def ensure_evolution_sheet(spreadsheet):
     try:
@@ -103,6 +117,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
             evo_sheet.append_row([time_str, sport_label, memory.get("total_bets", 0), memory.get("win_rate", "0%"), memory.get("net_profit_dollars", 0.0), "Standard", memory.get("learnings_and_adjustments", ""), summary])
     except Exception: pass
 
+# --- 2. MULTI-SOURCE PROBABLES ---
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -146,8 +161,9 @@ def fetch_today_probable_pitchers(target_date_str):
 
     return pitcher_map
 
+# --- 3. HIGH-LEVERAGE BULLPEN ENGINE ---
 def fetch_team_high_leverage_hierarchies():
-    print("Fetching official MLB season stats for Saves and Holds to identify Closers & Setup Men...")
+    print("Fetching official MLB season stats for Saves and Holds...")
     high_leverage_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -184,13 +200,13 @@ def fetch_team_high_leverage_hierarchies():
                 "closer": closers[0][0] if closers else "Unknown Closer",
                 "setup": [s[0] for s in setup_men[:2]]
             }
-    except Exception as e:
+    except Exception:
         pass
     return high_leverage_map
 
 def fetch_recent_bullpen_usage(days_back=2):
     hl_hierarchy = fetch_team_high_leverage_hierarchies()
-    print(f"Analyzing recent box scores using verified season Closer & Setup hierarchies...")
+    print("Analyzing recent box scores using verified Closer & Setup hierarchies...")
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -260,55 +276,184 @@ def fetch_recent_bullpen_usage(days_back=2):
 
     return objective_ratings
 
+# --- 4. ACCURATE AUTO-GRADING WITH DATE & TIME MATCHING ---
 def auto_grade_pending_bets(sheet, odds_key):
+    """Accurately grades bets by referencing the dedicated Game Start Time column."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1: return 0
         headers = [h.strip() for h in rows[0]]
-        status_idx, game_idx, bet_type_idx, pick_idx, odds_idx, units_idx = headers.index("Status"), headers.index("Game"), headers.index("Bet Type / Sportsbook"), headers.index("Pick"), headers.index("Odds"), headers.index("Units")
-        pending = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
-        if not pending: return 0
+        
+        status_idx = headers.index("Status")
+        game_idx = headers.index("Game")
+        bet_type_idx = headers.index("Bet Type / Sportsbook")
+        pick_idx = headers.index("Pick")
+        odds_idx = headers.index("Odds")
+        units_idx = headers.index("Units")
+        start_time_idx = headers.index("Game Start Time") if "Game Start Time" in headers else -1
+        
+        pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
+        if not pending_rows: return 0
 
-        scores = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3").json()
+        scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
+        resp = requests.get(scores_url)
+        if resp.status_code != 200: return 0
+        scores_data = resp.json()
         updates = []
-        for row_idx, r in pending:
-            game_title, odds, units = str(r[game_idx]).strip(), float(r[odds_idx]) if r[odds_idx] else -110.0, float(r[units_idx]) if r[units_idx] else 1.0
-            for match in scores:
+
+        for row_idx, r in pending_rows:
+            pick_date_str = str(r[0]).strip()
+            game_title = str(r[game_idx]).strip()
+            bet_type = str(r[bet_type_idx]).strip().lower()
+            pick_str = str(r[pick_idx]).strip()
+            logged_start_time = str(r[start_time_idx]).strip() if start_time_idx != -1 and len(r) > start_time_idx else ""
+            
+            try: odds = float(r[odds_idx])
+            except: odds = -110.0
+            
+            try: units = float(r[units_idx]) if r[units_idx] else 1.0
+            except: units = 1.0
+
+            for match in scores_data:
                 if not match.get("completed"): continue
-                home, away = match.get("home_team", ""), match.get("away_team", "")
-                if match_canonical_team(home) in game_title or match_canonical_team(away) in game_title:
-                    sc = match.get("scores")
-                    if not sc or len(sc) < 2: continue
-                    h_score = next((int(s["score"]) for s in sc if s["name"] == home), 0)
-                    a_score = next((int(s["score"]) for s in sc if s["name"] == away), 0)
-                    status = "WIN" if h_score > a_score else "LOSS"
-                    profit = ((100 / abs(odds)) * 100 * units) if (status == "WIN" and odds < 0) else (-100.0 * units)
+                
+                # PARSE API COMMENCE TIME TO COMPARE AGAINST LOGGED COLUMN
+                commence_time_str = match.get("commence_time", "")
+                match_time_et_str = ""
+                match_date_ny_str = ""
+                
+                if commence_time_str:
+                    try:
+                        game_dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
+                        game_dt_ny = game_dt_utc.astimezone(ZoneInfo("America/New_York"))
+                        match_date_ny_str = game_dt_ny.strftime("%Y-%m-%d")
+                        match_time_et_str = game_dt_ny.strftime("%Y-%m-%d %I:%M %p EDT")
+                    except Exception:
+                        pass
+                
+                # TIME-TRAVEL GUARDRAIL: Strict Verification
+                if logged_start_time:
+                    # If we logged a start time, it must match. If delayed slightly, at least enforce the Date matches.
+                    if logged_start_time != match_time_et_str and not logged_start_time.startswith(match_date_ny_str):
+                        continue
+                else:
+                    # Fallback if the bet was placed before we added the new column
+                    if pick_date_str != match_date_ny_str:
+                        continue
+
+                home_team = match.get("home_team", "")
+                away_team = match.get("away_team", "")
+                home_canonical = match_canonical_team(home_team)
+                away_canonical = match_canonical_team(away_team)
+
+                if (home_canonical in game_title or away_canonical in game_title or home_team in game_title or away_team in game_title):
+                    scores = match.get("scores")
+                    if not scores or len(scores) < 2: continue
+                    home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
+                    away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+                    total_score = home_score + away_score
+                    status = None
+                    profit = 0.0
+                    pick_lower = pick_str.lower()
+                    is_total = ("total" in bet_type or "over" in pick_lower or "under" in pick_lower or "o/u" in pick_lower)
+
+                    if is_total:
+                        num_match = re.search(r'(?:over|under|o/u|u|o)?\s*([0-9]+\.?[0-9]*)', pick_lower)
+                        if num_match:
+                            total_line = float(num_match.group(1))
+                            is_over = bool(re.search(r'\b(over|o)\b', pick_lower)) or "over" in pick_lower
+                            is_under = bool(re.search(r'\b(under|u)\b', pick_lower))
+                            if total_score == total_line:
+                                status = "PUSH"
+                            elif (is_over and total_score > total_line) or (is_under and total_score < total_line):
+                                status = "WIN"
+                            else:
+                                status = "LOSS"
+                    elif "spread" in bet_type or "run line" in bet_type or re.search(r'[-+]\d+\.?\d*', pick_str):
+                        spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
+                        spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
+                        is_home_pick = (home_canonical.lower() in pick_lower or home_team.lower() in pick_lower)
+                        pick_score = home_score if is_home_pick else away_score
+                        opp_score = away_score if is_home_pick else home_score
+                        diff = (pick_score + spread_val) - opp_score
+                        if diff == 0:
+                            status = "PUSH"
+                        elif diff > 0:
+                            status = "WIN"
+                        else:
+                            status = "LOSS"
+                    else:
+                        winner = home_team if home_score > away_score else away_team
+                        is_win = (match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() or pick_lower in winner.lower() or winner.lower() in pick_lower)
+                        status = "WIN" if is_win else "LOSS"
+
+                    # CORRECT PROFIT MATH FOR BOTH POSITIVE AND NEGATIVE ODDS
+                    if status == "WIN":
+                        if odds < 0:
+                            profit = (100.0 / abs(odds)) * 100.0 * units
+                        else:
+                            profit = (odds / 100.0) * 100.0 * units
+                    elif status == "LOSS":
+                        profit = -100.0 * units
+                    elif status == "PUSH":
+                        profit = 0.0
+
                     updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
                     break
-        if updates: sheet.batch_update(updates)
-        return len(updates)
+
+        if updates:
+            sheet.batch_update(updates)
+            return len(updates)
     except Exception as e:
         print(f"Auto-grade notice: {e}")
-        return 0
+    return 0
 
+# --- 5. SCOREBOARD & RECURSIVE MEMORY LOOP ---
 def update_scoreboard(spreadsheet):
     try:
-        sb = spreadsheet.worksheet("Scoreboard")
+        try: sb = spreadsheet.worksheet("Scoreboard")
+        except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
+        sb.update(range_name="A1:F4", values=[
+            ["Bot / Sport", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
+            ["MLB Bot", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
+            ["WNBA Bot", '=COUNTIF(WNBA!K:K, "WIN")', '=COUNTIF(WNBA!K:K, "LOSS")', '=COUNTIF(WNBA!K:K, "PENDING")', '=IFERROR(B3/(B3+C3), 0)', '=SUM(WNBA!L:L)'],
+            ["Total Overall", '=B2+B3', '=C2+C3', '=D2+D3', '=IFERROR(B4/(B4+C4), 0)', '=F2+F3']
+        ], value_input_option="USER_ENTERED")
     except Exception:
-        sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
-    sb.update(range_name="A1:F4", values=[
-        ["Bot / Sport", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
-        ["MLB Bot", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
-        ["WNBA Bot", '=COUNTIF(WNBA!K:K, "WIN")', '=COUNTIF(WNBA!K:K, "LOSS")', '=COUNTIF(WNBA!K:K, "PENDING")', '=IFERROR(B3/(B3+C3), 0)', '=SUM(WNBA!L:L)'],
-        ["Total Overall", '=B2+B3', '=C2+C3', '=D2+D3', '=IFERROR(B4/(B4+C4), 0)', '=F2+F3']
-    ], value_input_option="USER_ENTERED")
+        pass
 
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
             with open("bot_memory.json", "r") as f: return json.load(f)
         except Exception: pass
-    return {"total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0}
+    
+    default_memory = {
+        "total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0,
+        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
+        "reasoning_factor_weights": {
+            "starting_pitcher_expected_metrics": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
+            "platoon_and_lineup_splits": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
+            "statcast_contact_quality": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
+            "multi_source_consensus_and_divergence": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate model divergence."},
+            "bullpen_depth_and_fatigue": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
+            "umpire_and_situational_fatigue": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
+        }
+    }
+    with open("bot_memory.json", "w") as f:
+        json.dump(default_memory, f, indent=2)
+    return default_memory
+
+def calculate_factor_weight(wins, losses):
+    total = wins + losses
+    if total < 3: return 1.0, "Baseline sample size."
+    win_rate = wins / total
+    if win_rate >= 0.65:
+        return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor."
+    elif win_rate <= 0.40:
+        return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize."
+    else:
+        return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%)."
 
 def update_memory_from_sheet(sheet, memory):
     try:
@@ -324,6 +469,35 @@ def update_memory_from_sheet(sheet, memory):
         losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
         total = wins + losses
 
+        factors = memory.get("reasoning_factor_weights", {})
+        for key in factors:
+            factors[key]["wins"] = 0
+            factors[key]["losses"] = 0
+
+        keywords_map = {
+            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip"],
+            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup"],
+            "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg"],
+            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "backend", "load"],
+            "umpire_and_situational_fatigue": ["umpire", "strike zone", "getaway day", "travel", "time"]
+        }
+
+        for r in rows[1:]:
+            if len(r) > max(status_idx, reason_idx):
+                status = str(r[status_idx]).strip().upper()
+                reasoning = str(r[reason_idx]).lower()
+                if status in ["WIN", "LOSS"]:
+                    for factor_key, kws in keywords_map.items():
+                        if any(kw in reasoning for kw in kws):
+                            if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
+                            if status == "WIN": factors[factor_key]["wins"] += 1
+                            else: factors[factor_key]["losses"] += 1
+
+        for factor_key, data in factors.items():
+            w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
+            data["weight"] = w_val
+            data["instruction"] = inst
+
         if total > 0:
             memory["total_bets"] = total
             memory["wins"] = wins
@@ -336,6 +510,7 @@ def update_memory_from_sheet(sheet, memory):
         print(f"Memory update notice: {e}")
     return memory
 
+# --- 6. MATCHUP FORMATTING & GUARDRAILS ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -381,14 +556,12 @@ def check_for_hallucinated_pitchers(game_str, reasoning_str, probable_pitchers):
         pass
     return True
 
-# --- NEW: START TIME PARSING IN MATCHUP FORMATTER ---
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
     valid = []
     dropped = []
     for game in odds_data:
         home, away = match_canonical_team(game.get("home_team", "")), match_canonical_team(game.get("away_team", ""))
         
-        # Parse UTC commence_time into Eastern Time
         commence_time_str = game.get("commence_time")
         game_time_et = "Unknown Time"
         if commence_time_str:
@@ -398,12 +571,12 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
                 game_time_et = dt_et.strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception:
                 pass
-        
+
         h_pitcher = probable_pitchers.get(home, "TBD")
         a_pitcher = probable_pitchers.get(away, "TBD")
         
         if "TBD" in h_pitcher or "TBD" in a_pitcher: 
-            dropped.append(f"{away} ({a_pitcher}) @ {home} ({h_pitcher})")
+            dropped.append(f"{away} @ {home}")
             continue
             
         game_copy = dict(game)
@@ -419,6 +592,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
             
     return valid
 
+# --- 7. GEMINI GENERATION ---
 def parse_json_from_response(response):
     raw_text = ""
     if hasattr(response, "text") and response.text:
@@ -430,10 +604,8 @@ def parse_json_from_response(response):
     raw_text = raw_text.strip()
     json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
     if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except Exception:
-            pass
+        try: return json.loads(json_match.group(0))
+        except Exception: pass
         
     marker = "`" * 3
     clean_text = raw_text.replace(f"{marker}json", "").replace(marker, "").strip()
@@ -462,7 +634,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
 
     STRICT RULES:
     1. FACTUAL PITCHERS: NEVER invent or swap starting pitchers.
-    2. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, heavily penalize them. Do not contradict the status provided.
+    2. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, heavily penalize them.
     3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate day-after-night schedule fatigue and getaway day travel scenarios.
     4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
@@ -484,6 +656,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
       "new_picks": [
         {{
           "date": "YYYY-MM-DD",
+          "start_time": "YYYY-MM-DD HH:MM PM EDT",
           "game": "Away Team @ Home Team",
           "bet_type": "Moneyline (FanDuel)",
           "pick": "Team Name",
@@ -507,10 +680,11 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 parsed = parse_json_from_response(response)
                 if parsed and ("new_picks" in parsed or "validations" in parsed): return parsed
-            except Exception as e:
+            except Exception:
                 pass
     return {"validations": [], "new_picks": []}
 
+# --- 8. MAIN EXECUTION ---
 def main():
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
@@ -576,6 +750,7 @@ def main():
     
     for p in new_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
+        start_time_out = str(p.get("start_time", "")).strip()
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
@@ -596,10 +771,12 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
+        # Notice: Appending start_time_out precisely to Column P (Index 15)
         sheet.append_row([
             pick_date, current_time_str, game, bet_type, pick, int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
-            qk_units, "PENDING", 0.0, reasoning, "NEW", p.get("high_agreement", "No")
+            qk_units, "PENDING", 0.0, reasoning, "NEW", p.get("high_agreement", "No"),
+            start_time_out
         ])
         appended += 1
             
