@@ -122,50 +122,37 @@ def fetch_today_probable_pitchers(target_date_str):
     except Exception as e: print(f"Probables notice: {e}")
     return pitcher_map
 
-# --- DYNAMIC SEASON STATS CLOSER & SETUP MEN FETCHER ---
 def fetch_team_high_leverage_hierarchies():
-    """Fetches season pitching stats from MLB Stats API to map out actual team Closers and Setup Men."""
     print("Fetching official MLB season stats for Saves and Holds to identify Closers & Setup Men...")
     high_leverage_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        # Get all MLB teams endpoint
         teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
         if teams_resp.status_code != 200: return {}
         
-        teams = teams_resp.json().get("teams", [])
-        for t in teams:
+        for t in teams_resp.json().get("teams", []):
             team_id = t.get("id")
             canonical_name = match_canonical_team(t.get("name", ""))
             if not canonical_name: continue
 
-            # Fetch player stats for this team
             stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
             stats_resp = requests.get(stats_url, headers=headers, timeout=5)
             if stats_resp.status_code != 200: continue
 
-            closers = []
-            setup_men = []
-            
+            closers, setup_men = [], []
             for roster_item in stats_resp.json().get("roster", []):
                 person = roster_item.get("person", {})
                 p_name = person.get("fullName", "")
-                stats_list = person.get("stats", [])
-                
-                for s in stats_list:
+                for s in person.get("stats", []):
                     if s.get("type", {}).get("displayName") == "season":
                         split = s.get("splits", [])
                         if split:
                             stat_data = split[0].get("stat", {})
                             saves = int(stat_data.get("saves", 0))
                             holds = int(stat_data.get("holds", 0))
-                            
-                            if saves >= 2:
-                                closers.append((p_name, saves))
-                            if holds >= 2:
-                                setup_men.append((p_name, holds))
+                            if saves >= 2: closers.append((p_name, saves))
+                            if holds >= 2: setup_men.append((p_name, holds))
 
-            # Sort by highest saves/holds
             closers.sort(key=lambda x: x[1], reverse=True)
             setup_men.sort(key=lambda x: x[1], reverse=True)
 
@@ -177,7 +164,6 @@ def fetch_team_high_leverage_hierarchies():
         print(f"Notice during season stats ingestion: {e}")
     return high_leverage_map
 
-# --- ADVANCED SEASON-WEIGHTED BULLPEN ENGINE ---
 def fetch_recent_bullpen_usage(days_back=2):
     hl_hierarchy = fetch_team_high_leverage_hierarchies()
     print(f"Analyzing recent box scores using verified season Closer & Setup hierarchies...")
@@ -185,7 +171,6 @@ def fetch_recent_bullpen_usage(days_back=2):
     headers = {"User-Agent": "Mozilla/5.0"}
 
     team_stats = {}
-
     for d in range(1, days_back + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
         schedule_resp = requests.get(f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}", headers=headers, timeout=10)
@@ -222,15 +207,14 @@ def fetch_recent_bullpen_usage(days_back=2):
                         p_stats = p_info.get("stats", {}).get("pitching", {})
                         pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
 
-                        # Weight multiplier based on official season hierarchy
                         if p_name == closer_name:
-                            weight = 3.0 # Closer is 3x weighted
+                            weight = 3.0
                             team_stats[canonical]["closer_b2b"] = True
                         elif p_name in setup_names:
-                            weight = 2.0 # Setup men are 2x weighted
+                            weight = 2.0
                             team_stats[canonical]["setup_b2b"] = True
                         else:
-                            weight = 1.0 # Mop-up / middle relief
+                            weight = 1.0
 
                         team_stats[canonical]["raw_pitches"] += pitches
                         team_stats[canonical]["weighted_load"] += (pitches * weight)
@@ -325,7 +309,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
     return valid
 
 def generate_picks(odds_data, memory, open_picks, fatigue_ratings, probable_pitchers):
-    client = genai.Client(os.environ.get("GEMINI_API_KEY"))
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY")) # <-- FIXED POSITION ARGUMENT ERROR
     formatted_games = format_matchups(odds_data[:8], probable_pitchers, fatigue_ratings)
     if not formatted_games: return {"validations": [], "new_picks": []}
 
