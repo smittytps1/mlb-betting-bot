@@ -1,0 +1,64 @@
+{
+  "total_bets": 47,
+  "wins": 19,
+  "losses": 28,
+  "win_rate": "40.4%",
+  "net_profit_dollars": -894.49,
+  "high_agreement_yes_performance": {
+    "wins": 0,
+    "losses": 0,
+    "win_rate": "0%",
+    "profit": 0.0
+  },
+  "high_agreement_no_performance": {
+    "wins": 0,
+    "losses": 0,
+    "win_rate": "0%",
+    "profit": 0.0
+  },
+  "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
+  "reasoning_factor_weights": {
+    "starting_pitcher_expected_metrics": {
+      "wins": 5,
+      "losses": 10,
+      "weight": 0.8,
+      "instruction": "Cold streak (33.3%). De-emphasize."
+    },
+    "platoon_and_lineup_splits": {
+      "wins": 3,
+      "losses": 5,
+      "weight": 0.85,
+      "instruction": "Cold streak (37.5%). De-emphasize."
+    },
+    "statcast_contact_quality": {
+      "wins": 3,
+      "losses": 9,
+      "weight": 0.7,
+      "instruction": "Cold streak (25.0%). De-emphasize."
+    },
+    "ballpark_and_weather_simulation": {
+      "wins": 3,
+      "losses": 3,
+      "weight": 1.0,
+      "instruction": "Neutral performance (50.0%)."
+    },
+    "multi_source_consensus_and_divergence": {
+      "wins": 0,
+      "losses": 0,
+      "weight": 1.0,
+      "instruction": "Baseline sample size."
+    },
+    "bullpen_depth_and_fatigue": {
+      "wins": 13,
+      "losses": 20,
+      "weight": 0.87,
+      "instruction": "Cold streak (39.4%). De-emphasize."
+    },
+    "umpire_and_situational_fatigue": {
+      "wins": 1,
+      "losses": 0,
+      "weight": 1.0,
+      "instruction": "Baseline sample size."
+    }
+  }
+}
