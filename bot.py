@@ -308,10 +308,34 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
         valid.append(game_copy)
     return valid
 
+def parse_json_from_response(response):
+    raw_text = ""
+    if hasattr(response, "text") and response.text:
+        raw_text = response.text
+    elif hasattr(response, "candidates") and response.candidates:
+        parts = response.candidates[0].content.parts
+        raw_text = "".join([p.text for p in parts if hasattr(p, "text") and p.text])
+
+    raw_text = raw_text.strip()
+    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except Exception:
+            pass
+        
+    marker = "`" * 3
+    clean_text = raw_text.replace(f"{marker}json", "").replace(marker, "").strip()
+    return json.loads(clean_text)
+
 def generate_picks(odds_data, memory, open_picks, fatigue_ratings, probable_pitchers):
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY")) # <-- FIXED POSITION ARGUMENT ERROR
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key)
+    
     formatted_games = format_matchups(odds_data[:8], probable_pitchers, fatigue_ratings)
-    if not formatted_games: return {"validations": [], "new_picks": []}
+    if not formatted_games: 
+        print("WARNING: No valid matchups found (check TBD pitchers).")
+        return {"validations": [], "new_picks": []}
 
     prompt = f"""
     You are an elite quantitative MLB betting engine.
@@ -339,11 +363,36 @@ def generate_picks(odds_data, memory, open_picks, fatigue_ratings, probable_pitc
       ]
     }}
     """
-    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-    try:
-        return json.loads(re.search(r'\{.*\}', resp.text, re.DOTALL).group(0))
-    except Exception:
-        return {"validations": [], "new_picks": []}
+
+    candidate_models = [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview"
+    ]
+
+    for model_name in candidate_models:
+        for attempt in range(2):
+            try:
+                print(f"Attempting pick synthesis with model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                parsed = parse_json_from_response(response)
+                if parsed and ("new_picks" in parsed or "validations" in parsed):
+                    return parsed
+            except errors.ClientError as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    time.sleep(5)
+                elif "404" in str(e):
+                    break
+                else:
+                    break
+            except Exception as e:
+                break
+
+    return {"validations": [], "new_picks": []}
 
 def main():
     spreadsheet, sheet = get_sheets()
