@@ -398,7 +398,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                 if (home_canonical in game_title or away_canonical in game_title or
                     home_team in game_title or away_team in game_title):
                     
-                    # THE FIX: strict Local Date Matcher (New York timezone)
                     if commence_time_str:
                         try:
                             game_dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
@@ -407,7 +406,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                             
                             pick_date_str = str(r[0]).strip()
                             if pick_date_str != game_date_ny_str:
-                                continue # Skip if the game wasn't played on the exact date in Column A
+                                continue 
                         except Exception:
                             pass
 
@@ -857,8 +856,9 @@ def generate_picks_and_validations(odds_data, memory, open_picks, bullpen_logs, 
        - For plus-money underdogs (+105 or higher), require a strict minimum of +13.5% EV to account for variance.
        - Cap underdog model win probability projections at a maximum of +3.5% above market implied odds.
 
-    5. DYNAMIC PRIMARY-DRIVER REASONING:
+    5. DYNAMIC PRIMARY-DRIVER REASONING & BULLPEN CONSTRAINT (ZERO TOLERANCE):
        - Focus your reasoning summary ONLY on the 1-3 specific primary factors that generated the EV edge for that matchup.
+       - STRICT RULE: Never invent specific pitch counts or appearance totals. Use only qualitative assessments like 'heavily taxed', 'rested', or 'depleted' when evaluating bullpens. Do not mention specific numbers of relievers used or pitches thrown unless directly citing the input data.
 
     === ACTIVE OPEN PICKS ALREADY LOGGED TODAY ===
     {json.dumps(open_picks, indent=2)}
