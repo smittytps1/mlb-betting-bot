@@ -421,10 +421,6 @@ def auto_grade_pending_bets(sheet, odds_key):
 
 # --- 5. ROBUST UNIVERSAL MULTI-TIMEFRAME SCOREBOARD ---
 def update_scoreboard(spreadsheet):
-    """
-    Writes robust SUMPRODUCT formulas that dynamically handle both string dates and 
-    native date serials across 7-Day, 3-Day, and 1-Day timeframes.
-    """
     try:
         try: sb = spreadsheet.worksheet("Scoreboard")
         except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
@@ -644,7 +640,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
             
     return valid
 
-# --- 8. GEMINI GENERATION ---
+# --- 8. GEMINI PRO REASONING & SYNTHESIS ---
 def parse_json_from_response(response):
     raw_text = ""
     if hasattr(response, "text") and response.text:
@@ -723,17 +719,30 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     }}
     """
 
-    candidate_models = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview"]
+    # Upgraded priority list targeting 2026 state-of-the-art Pro models for deep synthesis
+    candidate_models = [
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash"
+    ]
 
     for model_name in candidate_models:
         for attempt in range(2):
             try:
-                print(f"Attempting pick synthesis with model: {model_name}...")
+                print(f"Attempting deep synthesis with model: {model_name}...")
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 parsed = parse_json_from_response(response)
                 if parsed and ("new_picks" in parsed or "validations" in parsed): return parsed
-            except Exception:
-                pass
+            except errors.ClientError as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    time.sleep(10)
+                elif "404" in str(e):
+                    break
+                else:
+                    break
+            except Exception as e:
+                break
     return {"validations": [], "new_picks": []}
 
 # --- 9. MAIN EXECUTION ---
@@ -823,7 +832,7 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
-        # Uses USER_ENTERED to properly parse dates and numerical fields natively
+        # Append using USER_ENTERED so dates, formulas, and numbers format accurately
         sheet.append_row([
             pick_date, current_time_str, game, bet_type, pick, int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
