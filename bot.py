@@ -419,8 +419,12 @@ def auto_grade_pending_bets(sheet, odds_key):
         print(f"Auto-grade notice: {e}")
     return 0
 
-# --- 5. ADVANCED MULTI-TIMEFRAME SCOREBOARD UPDATER ---
+# --- 5. ROBUST UNIVERSAL MULTI-TIMEFRAME SCOREBOARD ---
 def update_scoreboard(spreadsheet):
+    """
+    Writes robust SUMPRODUCT formulas that dynamically handle both string dates and 
+    native date serials across 7-Day, 3-Day, and 1-Day timeframes.
+    """
     try:
         try: sb = spreadsheet.worksheet("Scoreboard")
         except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
@@ -428,22 +432,37 @@ def update_scoreboard(spreadsheet):
         scoreboard_data = [
             ["Bot / Sport & Timeframe", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
             
-            # MLB Bot All-Time
+            # Row 2: MLB Bot All-Time
             ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
             
-            # MLB Bot 7-Day (1 Week)
-            ["MLB Bot (7-Day / 1-Week)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-7)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-7)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-7)', '=IFERROR(B3/(B3+C3), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-7)'],
+            # Row 3: MLB Bot 7-Day (1 Week)
+            ["MLB Bot (7-Day / 1-Week)", 
+             '=SUMPRODUCT((MLB!K2:K="WIN")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="LOSS")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="PENDING")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', 
+             '=IFERROR(B3/(B3+C3), 0)', 
+             '=SUMPRODUCT((IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>"")*(IFERROR(VALUE(MLB!L2:L),0)))'],
             
-            # MLB Bot 3-Day
-            ["MLB Bot (3-Day)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-3)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-3)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-3)', '=IFERROR(B4/(B4+C4), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-3)'],
+            # Row 4: MLB Bot 3-Day
+            ["MLB Bot (3-Day)", 
+             '=SUMPRODUCT((MLB!K2:K="WIN")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-3)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="LOSS")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-3)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="PENDING")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-3)*(MLB!A2:A<>""))', 
+             '=IFERROR(B4/(B4+C4), 0)', 
+             '=SUMPRODUCT((IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-3)*(MLB!A2:A<>"")*(IFERROR(VALUE(MLB!L2:L),0)))'],
             
-            # MLB Bot 1-Day (Today/Last 24h)
-            ["MLB Bot (1-Day / Today)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-1)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-1)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-1)', '=IFERROR(B5/(B5+C5), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-1)'],
+            # Row 5: MLB Bot 1-Day (Today/Last 24h)
+            ["MLB Bot (1-Day / Today)", 
+             '=SUMPRODUCT((MLB!K2:K="WIN")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-1)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="LOSS")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-1)*(MLB!A2:A<>""))', 
+             '=SUMPRODUCT((MLB!K2:K="PENDING")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-1)*(MLB!A2:A<>""))', 
+             '=IFERROR(B5/(B5+C5), 0)', 
+             '=SUMPRODUCT((IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-1)*(MLB!A2:A<>"")*(IFERROR(VALUE(MLB!L2:L),0)))'],
             
-            # WNBA Bot All-Time
+            # Row 6: WNBA Bot All-Time
             ["WNBA Bot (All-Time)", '=IFERROR(COUNTIF(WNBA!K:K, "WIN"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "LOSS"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "PENDING"), 0)', '=IFERROR(B6/(B6+C6), 0)', '=IFERROR(SUM(WNBA!L:L), 0)'],
             
-            # Total Overall (All-Time Combined)
+            # Row 7: Total Overall (Combined All-Time)
             ["Total Overall (All-Time Combined)", '=B2+B6', '=C2+C6', '=D2+D6', '=IFERROR(B7/(B7+C7), 0)', '=F2+F6']
         ]
         
@@ -518,12 +537,13 @@ def update_memory_from_sheet(sheet, memory):
                 reasoning = str(r[reason_idx]).lower()
                 if status in ["WIN", "LOSS"]:
                     for factor_key, kws in keywords_map.items():
-                        if any(kw in reasoning for factor_key, kws in keywords_map.items() for kw in kws): pass
-                        # Proper fix for loop logic
                         if any(kw in reasoning for kw in kws):
-                            if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
-                            if status == "WIN": factors[factor_key]["wins"] += 1
-                            else: factors[factor_key]["losses"] += 1
+                            if factor_key not in factors: 
+                                factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
+                            if status == "WIN": 
+                                factors[factor_key]["wins"] += 1
+                            else: 
+                                factors[factor_key]["losses"] += 1
 
         for factor_key, data in factors.items():
             w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
@@ -803,12 +823,13 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
+        # Uses USER_ENTERED to properly parse dates and numerical fields natively
         sheet.append_row([
             pick_date, current_time_str, game, bet_type, pick, int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, reasoning, "NEW", p.get("high_agreement", "No"),
             start_time_out
-        ])
+        ], value_input_option="USER_ENTERED")
         appended += 1
             
     print(f"Execution complete! Added {appended} new picks, {len(validations)} validations processed. Skipped {skipped} duplicates/hallucinations.")
