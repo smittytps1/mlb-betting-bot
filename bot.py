@@ -294,7 +294,6 @@ def fetch_recent_bullpen_usage(days_back=2):
 
 # --- 4. ACCURATE AUTO-GRADING WITH DATE & TIME MATCHING ---
 def auto_grade_pending_bets(sheet, odds_key):
-    """Accurately grades bets by referencing the dedicated Game Start Time column."""
     try:
         rows = sheet.get_all_values()
         if len(rows) <= 1: return 0
@@ -333,7 +332,6 @@ def auto_grade_pending_bets(sheet, odds_key):
             for match in scores_data:
                 if not match.get("completed"): continue
                 
-                # PARSE API COMMENCE TIME TO COMPARE AGAINST LOGGED COLUMN
                 commence_time_str = match.get("commence_time", "")
                 match_time_et_str = ""
                 match_date_ny_str = ""
@@ -401,7 +399,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                         is_win = (match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() or pick_lower in winner.lower() or winner.lower() in pick_lower)
                         status = "WIN" if is_win else "LOSS"
 
-                    # ACCURATE PROFIT CALCULATION FOR BOTH POSITIVE AND NEGATIVE ODDS
                     if status == "WIN":
                         if odds < 0:
                             profit = (100.0 / abs(odds)) * 100.0 * units
@@ -435,13 +432,13 @@ def update_scoreboard(spreadsheet):
             ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
             
             # MLB Bot 7-Day (1 Week)
-            ["MLB Bot (7-Day / 1-Week)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=IFERROR(B3/(B3+C3), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))'],
+            ["MLB Bot (7-Day / 1-Week)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-7)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-7)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-7)', '=IFERROR(B3/(B3+C3), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-7)'],
             
             # MLB Bot 3-Day
-            ["MLB Bot (3-Day)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=IFERROR(B4/(B4+C4), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))'],
+            ["MLB Bot (3-Day)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-3)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-3)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-3)', '=IFERROR(B4/(B4+C4), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-3)'],
             
             # MLB Bot 1-Day (Today/Last 24h)
-            ["MLB Bot (1-Day / Today)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=IFERROR(B5/(B5+C5), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))'],
+            ["MLB Bot (1-Day / Today)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TODAY()-1)', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TODAY()-1)', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TODAY()-1)', '=IFERROR(B5/(B5+C5), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TODAY()-1)'],
             
             # WNBA Bot All-Time
             ["WNBA Bot (All-Time)", '=IFERROR(COUNTIF(WNBA!K:K, "WIN"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "LOSS"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "PENDING"), 0)', '=IFERROR(B6/(B6+C6), 0)', '=IFERROR(SUM(WNBA!L:L), 0)'],
@@ -521,6 +518,8 @@ def update_memory_from_sheet(sheet, memory):
                 reasoning = str(r[reason_idx]).lower()
                 if status in ["WIN", "LOSS"]:
                     for factor_key, kws in keywords_map.items():
+                        if any(kw in reasoning for factor_key, kws in keywords_map.items() for kw in kws): pass
+                        # Proper fix for loop logic
                         if any(kw in reasoning for kw in kws):
                             if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
                             if status == "WIN": factors[factor_key]["wins"] += 1
