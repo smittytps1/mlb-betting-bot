@@ -94,7 +94,6 @@ def ensure_headers(sheet):
         if not existing or not existing[0] or existing[0][0] != "Date": 
             sheet.insert_row(headers, index=1)
         else:
-            # Ensure the new Game Start Time column exists at index 16 (Column P) without shifting others
             current_headers = existing[0]
             if "Game Start Time" not in current_headers:
                 sheet.update_cell(1, 16, "Game Start Time")
@@ -113,11 +112,28 @@ def ensure_evolution_sheet(spreadsheet):
 def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
     try:
         evo_sheet = ensure_evolution_sheet(spreadsheet)
-        if evo_sheet:
-            evo_sheet.append_row([time_str, sport_label, memory.get("total_bets", 0), memory.get("win_rate", "0%"), memory.get("net_profit_dollars", 0.0), "Standard", memory.get("learnings_and_adjustments", ""), summary])
-    except Exception: pass
+        if not evo_sheet: return
+        
+        factors = memory.get("reasoning_factor_weights", {})
+        if factors:
+            weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
+        else:
+            weights_str = "Standard (1.0x)"
 
-# --- 2. MULTI-SOURCE PROBABLES ---
+        evo_sheet.append_row([
+            time_str, 
+            sport_label, 
+            memory.get("total_bets", 0), 
+            memory.get("win_rate", "0%"), 
+            memory.get("net_profit_dollars", 0.0), 
+            weights_str, 
+            memory.get("learnings_and_adjustments", "Maintain balanced quantitative multi-factor evaluation."), 
+            summary
+        ])
+    except Exception as e:
+        print(f"Notice while logging to Evolution tab: {e}")
+
+# --- 2. MULTI-SOURCE PROBABLES (ESPN + MLB STATS API) ---
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -331,13 +347,11 @@ def auto_grade_pending_bets(sheet, odds_key):
                     except Exception:
                         pass
                 
-                # TIME-TRAVEL GUARDRAIL: Strict Verification
+                # STRICT TIME-TRAVEL GUARDRAIL
                 if logged_start_time:
-                    # If we logged a start time, it must match. If delayed slightly, at least enforce the Date matches.
                     if logged_start_time != match_time_et_str and not logged_start_time.startswith(match_date_ny_str):
                         continue
                 else:
-                    # Fallback if the bet was placed before we added the new column
                     if pick_date_str != match_date_ny_str:
                         continue
 
@@ -387,7 +401,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                         is_win = (match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() or pick_lower in winner.lower() or winner.lower() in pick_lower)
                         status = "WIN" if is_win else "LOSS"
 
-                    # CORRECT PROFIT MATH FOR BOTH POSITIVE AND NEGATIVE ODDS
+                    # ACCURATE PROFIT CALCULATION FOR BOTH POSITIVE AND NEGATIVE ODDS
                     if status == "WIN":
                         if odds < 0:
                             profit = (100.0 / abs(odds)) * 100.0 * units
@@ -408,20 +422,39 @@ def auto_grade_pending_bets(sheet, odds_key):
         print(f"Auto-grade notice: {e}")
     return 0
 
-# --- 5. SCOREBOARD & RECURSIVE MEMORY LOOP ---
+# --- 5. ADVANCED MULTI-TIMEFRAME SCOREBOARD UPDATER ---
 def update_scoreboard(spreadsheet):
     try:
         try: sb = spreadsheet.worksheet("Scoreboard")
         except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
-        sb.update(range_name="A1:F4", values=[
-            ["Bot / Sport", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
-            ["MLB Bot", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
-            ["WNBA Bot", '=COUNTIF(WNBA!K:K, "WIN")', '=COUNTIF(WNBA!K:K, "LOSS")', '=COUNTIF(WNBA!K:K, "PENDING")', '=IFERROR(B3/(B3+C3), 0)', '=SUM(WNBA!L:L)'],
-            ["Total Overall", '=B2+B3', '=C2+C3', '=D2+D3', '=IFERROR(B4/(B4+C4), 0)', '=F2+F3']
-        ], value_input_option="USER_ENTERED")
-    except Exception:
-        pass
+        
+        scoreboard_data = [
+            ["Bot / Sport & Timeframe", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
+            
+            # MLB Bot All-Time
+            ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
+            
+            # MLB Bot 7-Day (1 Week)
+            ["MLB Bot (7-Day / 1-Week)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))', '=IFERROR(B3/(B3+C3), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-7, "yyyy-mm-dd"))'],
+            
+            # MLB Bot 3-Day
+            ["MLB Bot (3-Day)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))', '=IFERROR(B4/(B4+C4), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-3, "yyyy-mm-dd"))'],
+            
+            # MLB Bot 1-Day (Today/Last 24h)
+            ["MLB Bot (1-Day / Today)", '=COUNTIFS(MLB!K:K, "WIN", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "LOSS", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=COUNTIFS(MLB!K:K, "PENDING", MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))', '=IFERROR(B5/(B5+C5), 0)', '=SUMIFS(MLB!L:L, MLB!A:A, ">="&TEXT(TODAY()-1, "yyyy-mm-dd"))'],
+            
+            # WNBA Bot All-Time
+            ["WNBA Bot (All-Time)", '=IFERROR(COUNTIF(WNBA!K:K, "WIN"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "LOSS"), 0)', '=IFERROR(COUNTIF(WNBA!K:K, "PENDING"), 0)', '=IFERROR(B6/(B6+C6), 0)', '=IFERROR(SUM(WNBA!L:L), 0)'],
+            
+            # Total Overall (All-Time Combined)
+            ["Total Overall (All-Time Combined)", '=B2+B6', '=C2+C6', '=D2+D6', '=IFERROR(B7/(B7+C7), 0)', '=F2+F6']
+        ]
+        
+        sb.update(range_name="A1:F7", values=scoreboard_data, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"Scoreboard notice: {e}")
 
+# --- 6. RECURSIVE MEMORY & FACTOR WEIGHTING ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -510,7 +543,7 @@ def update_memory_from_sheet(sheet, memory):
         print(f"Memory update notice: {e}")
     return memory
 
-# --- 6. MATCHUP FORMATTING & GUARDRAILS ---
+# --- 7. MATCHUP FORMATTING & GUARDRAILS ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -592,7 +625,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
             
     return valid
 
-# --- 7. GEMINI GENERATION ---
+# --- 8. GEMINI GENERATION ---
 def parse_json_from_response(response):
     raw_text = ""
     if hasattr(response, "text") and response.text:
@@ -684,7 +717,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
                 pass
     return {"validations": [], "new_picks": []}
 
-# --- 8. MAIN EXECUTION ---
+# --- 9. MAIN EXECUTION ---
 def main():
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
@@ -771,7 +804,6 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
-        # Notice: Appending start_time_out precisely to Column P (Index 15)
         sheet.append_row([
             pick_date, current_time_str, game, bet_type, pick, int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
