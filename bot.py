@@ -71,7 +71,9 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         if b <= 0: return 1.0
         kelly = (b * prob_val - (1.0 - prob_val)) / b
         if kelly <= 0: return 0.5
-        raw_units = (kelly * 0.25) * 80.0
+        
+        # Anchor: A solid 10% Kelly edge produces exactly 1.0 unit.
+        raw_units = (kelly * 0.25) * 40.0
         return max(0.5, min(3.0, round(raw_units, 2)))
     except Exception:
         return 1.0
@@ -642,6 +644,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate schedule fatigue.
     4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
+    6. VALIDATIONS: If the 'ACTIVE PENDING PICKS' list is empty, you MUST return an absolutely empty array for validations (`"validations": []`). DO NOT write text summaries in the array.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -666,9 +669,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
 
     candidate_models = [
         "gemini-3.1-pro-preview", 
-        "gemini-2.5-pro",         
-        "gemini-3.7-flash",       
-        "gemini-3.5-flash"        
+        "gemini-3.7-flash"        
     ]
 
     for model_name in candidate_models:
@@ -691,18 +692,6 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
 
 # --- 9. MAIN EXECUTION ---
 def main():
-    print("--- DIAGNOSTIC: CHECKING AVAILABLE GEMINI MODELS ---")
-    try:
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-        available_models = [m.name for m in client.models.list()]
-        print("Models unlocked for your API key:")
-        for m in available_models:
-            if "pro" in m.lower() or "flash" in m.lower():
-                print(f" - {m}")
-    except Exception as e:
-        print(f"Could not list models: {e}")
-    print("----------------------------------------------------")
-
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
     ensure_evolution_sheet(spreadsheet)
@@ -739,7 +728,6 @@ def main():
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
         for val in validations:
-            # FIX: Ensure the validation object is actually a dictionary before processing
             if not isinstance(val, dict):
                 print(f"  [Warning] Skipping malformed validation: {val}")
                 continue
@@ -770,7 +758,6 @@ def main():
     appended, skipped = 0, 0
     
     for p in new_picks:
-        # FIX: Ensure the new pick object is actually a dictionary before processing
         if not isinstance(p, dict):
             print(f"  [Warning] Skipping malformed pick entry: {p}")
             continue
