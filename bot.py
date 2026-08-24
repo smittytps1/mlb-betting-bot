@@ -72,7 +72,7 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         kelly = (b * prob_val - (1.0 - prob_val)) / b
         if kelly <= 0: return 0.5
         
-        # Anchor: A solid 10% Kelly edge produces exactly 1.0 unit.
+        # Sizing anchor: ~10% Kelly edge produces ~1.0 unit
         raw_units = (kelly * 0.25) * 40.0
         return max(0.5, min(3.0, round(raw_units, 2)))
     except Exception:
@@ -644,11 +644,26 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate schedule fatigue.
     4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
-    6. VALIDATIONS: If the 'ACTIVE PENDING PICKS' list is empty, you MUST return an absolutely empty array for validations (`"validations": []`). DO NOT write text summaries in the array.
+    6. PORTFOLIO CAP & EV UPGRADES: You maintain a maximum of 5 ACTIVE pending picks per day. Rank all current and potential edges by Expected Value (EV %). 
+       - If you have room in the 5-pick cap, add the highest-EV available plays to `new_picks`.
+       - If you find a new matchup with a mathematically higher EV than an existing pending pick, output "REJECTED" for the weaker pending pick in the validations array, and add the new higher-EV play to `new_picks`.
+       - If a pending pick's value has degraded due to line movement or new bullpen data, REJECT it.
+    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, you MUST evaluate each against current odds and return a corresponding object in the 'validations' array with action 'VALIDATED' or 'REJECTED'. If empty, return an empty array (`"validations": []`).
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
-      "validations": [],
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float, e.g. -110>,
+          "updated_implied_prob": "52.4%",
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+10.7%",
+          "high_agreement": "<Consensus/Divergence>",
+          "reason": "<tight summary>"
+        }}
+      ],
       "new_picks": [
         {{
           "date": "YYYY-MM-DD",
@@ -679,7 +694,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 parsed = parse_json_from_response(response)
                 if parsed and ("new_picks" in parsed or "validations" in parsed):
-                    print(f"Success! Model {model_name} generated valid JSON picks.")
+                    print(f"Success! Model {model_name} generated valid JSON output.")
                     return parsed
             except errors.ClientError as e:
                 print(f"ClientError on {model_name}: {e}")
@@ -749,6 +764,12 @@ def main():
                         qk_units = compute_quarter_kelly_units(updated_odds, updated_model_prob)
                         sheet.update_cell(row_idx, 10, qk_units)
                     if "high_agreement" in val and val["high_agreement"]: sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
+                    if reason: sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                elif action == "REJECTED":
+                    # Update status to REJECTED so the auto-grader ignores it
+                    sheet.update_cell(row_idx, 11, "REJECTED")
+                    sheet.update_cell(row_idx, 12, 0.0) # Ensure P/L registers as flat zero
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
 
