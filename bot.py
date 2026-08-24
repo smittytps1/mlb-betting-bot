@@ -664,12 +664,11 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     }}
     """
 
-    # 2026 Model Priority List
     candidate_models = [
-        "gemini-3.0-pro",
-        "gemini-3.1-pro-preview",
-        "gemini-3.5-flash",
-        "gemini-1.5-pro" # Fallback if 2026 models are not enabled for this key
+        "gemini-3.1-pro-preview", 
+        "gemini-2.5-pro",         
+        "gemini-3.7-flash",       
+        "gemini-3.5-flash"        
     ]
 
     for model_name in candidate_models:
@@ -740,6 +739,11 @@ def main():
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
         for val in validations:
+            # FIX: Ensure the validation object is actually a dictionary before processing
+            if not isinstance(val, dict):
+                print(f"  [Warning] Skipping malformed validation: {val}")
+                continue
+
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
@@ -760,10 +764,17 @@ def main():
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
 
+                print(f"Row {row_idx} evaluated as {action}.")
+
     raw_rows = sheet.get_all_values()
     appended, skipped = 0, 0
     
     for p in new_picks:
+        # FIX: Ensure the new pick object is actually a dictionary before processing
+        if not isinstance(p, dict):
+            print(f"  [Warning] Skipping malformed pick entry: {p}")
+            continue
+
         pick_date = str(p.get("date", today_date_str)).strip()
         start_time_out = str(p.get("start_time", "")).strip()
         game = str(p.get("game", "")).strip()
