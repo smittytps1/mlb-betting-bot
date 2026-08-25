@@ -448,7 +448,7 @@ def get_today_existing_picks(sheet, today_date_str):
 
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics):
     valid = []
-    matchup_cache = {}  # Python stores the exact math here to prevent AI hallucinations
+    matchup_cache = {}  
     current_utc = datetime.now(ZoneInfo("UTC"))
     
     for game in odds_data:
@@ -469,7 +469,6 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         
         home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics)
         
-        # Save exact string data securely in Python's cache
         away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
         home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
         
@@ -516,11 +515,12 @@ def generate_picks_and_validations(formatted_games, memory, open_picks):
     === TODAY'S MATCHUPS & PYTHON MATH BASELINE ===
     {json.dumps(formatted_games, indent=2)}
 
-    STRICT RULES:
-    1. THE LEASH: You may only adjust Python's 'home_win_prob_baseline' or 'away_win_prob_baseline' by a MAXIMUM of ± 8.0%.
-    2. CONTEXT, NEWS & PITCHERS: Use your broad knowledge base to evaluate the specific Starting Pitchers listed (e.g., historical xFIP, recent form, splits). Synthesize any recent MLB news, injury reports, weather anomalies, or umpire tendencies to make your final probability adjustment. 
-    3. THE 11 PERCENT THRESHOLD: Recommend picks where your final adjusted `model_prob` provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds.
-    4. NO FABRICATION: Do not invent any numbers. Do not rewrite Python's math. 
+    STRICT RULES & DIRECTIVES:
+    1. THE TIGHT LEASH (±5.0% MAX): You may only adjust Python's 'home_win_prob_baseline' or 'away_win_prob_baseline' by a maximum of ± 5.0%. 
+    2. ANTI-HYPE & OBJECTIVITY: Disregard media hype, prospect excitement, or narrative-driven biases. Base your synthesis entirely on hard data: actual pitching performance metrics (like xFIP, ERA, WHIP), verified injury statuses, true lineup splits, and concrete environmental or fatigue factors.
+    3. NO FORCING / NO ARTIFICIAL SHIFTING: Do not adjust a probability simply to force a game past the 11.0% Expected Value threshold. If the true synthesized context does not warrant a shift, leave the baseline as close to Python's math as possible. Only shift when concrete data substantiates it.
+    4. THE 11 PERCENT EV THRESHOLD: Recommend picks where your final rigorously synthesized `model_prob` provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds.
+    5. NO FABRICATION: Do not invent any numbers or rewrite Python's math logs.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -543,11 +543,11 @@ def generate_picks_and_validations(formatted_games, memory, open_picks):
           "pick": "Team Name",
           "odds": -110,
           "implied_prob": "52.4%",
-          "model_prob": "57.5%",
+          "model_prob": "55.0%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<Summary of the starting pitcher edges or news you used to shift the baseline>",
-          "ai_contextual_shift": "Shifted +X% because <reason>"
+          "reasoning": "<Objective, data-driven explanation of underlying stats or metrics driving the shift>",
+          "ai_contextual_shift": "Shifted +X% because <strict factual reason>"
         }}
       ]
     }}
@@ -588,7 +588,6 @@ def main():
         print("Error: No odds returned from API.")
         return
 
-    # Python caches the exact math so Gemini can't hallucinate it
     formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics)
     
     if not formatted_games:
@@ -599,7 +598,6 @@ def main():
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(formatted_games, memory, open_picks)
     
-    # Process Validations
     validations = ai_response.get("validations", [])
     if validations:
         for val in validations:
@@ -617,10 +615,8 @@ def main():
                     sheet.update_cell(row_idx, 12, 0.0)
                     sheet.update_cell(row_idx, 2, current_time_str)
 
-    # Process New Picks
     new_picks = ai_response.get("new_picks", [])
     appended = 0
-    raw_rows = sheet.get_all_values()
     
     for p in new_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
@@ -630,8 +626,6 @@ def main():
         except: odds_val = -110.0
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
-        
-        # Python retrieves the secure, un-hallucinated string data
         cache_data = matchup_cache.get(game, {})
 
         sheet.append_row([
@@ -639,10 +633,10 @@ def main():
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
             str(p.get("start_time", "")).strip(),
-            cache_data.get("away_bp", "N/A"),           # Secure Injection Column Q
-            cache_data.get("home_bp", "N/A"),           # Secure Injection Column R
-            cache_data.get("math", "N/A"),              # Secure Injection Column S
-            p.get("ai_contextual_shift", "")            # AI Output Column T
+            cache_data.get("away_bp", "N/A"),           
+            cache_data.get("home_bp", "N/A"),           
+            cache_data.get("math", "N/A"),              
+            p.get("ai_contextual_shift", "")            
         ], value_input_option="USER_ENTERED")
         appended += 1
             
