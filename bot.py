@@ -50,7 +50,7 @@ def match_canonical_team(name_str):
     if not name_str: return ""
     cleaned = str(name_str).strip().lower()
     cleaned_norm = normalize_text(cleaned)
-    for canonical, aliases in MLB_TEAM_ALIitems():
+    for canonical, aliases in MLB_TEAM_ALIASES.items():
         for alias in aliases:
             if alias == cleaned or normalize_text(alias) == cleaned_norm or alias in cleaned or cleaned in alias:
                 return canonical.title()
@@ -453,8 +453,14 @@ def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
         raw_text = "".join([p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text])
-    json_match = re.search(r'\{.*\}', raw_text.strip(), re.DOTALL)
+    
+    # Safely extract JSON via regex to prevent string literal syntax errors
+    json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw_text.strip(), re.DOTALL)
     if json_match:
-        try: return json.loads(json_match.group(0))
-        except Exception: pass
-    return json.loads(raw_text.replace("```json", "").replace("
+        try:
+            return json.loads(json_match.group(1))
+        except Exception:
+            pass
+            
+    # Fallback cleanup
+    clean_text = raw_text.replace("```json", "").replace("
