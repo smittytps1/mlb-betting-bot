@@ -92,7 +92,7 @@ def calculate_runline_prob(lam_fav, lam_dog):
             prob_cover += poisson_probability(lam_fav, f) * poisson_probability(lam_dog, d)
     return max(0.01, min(0.99, prob_cover))
 
-# --- 1. GOOGLE SHEETS SETUP (STRICTLY MLB TAB) ---
+# --- 1. GOOGLE SHEETS SETUP (STRICTLY MLB TAB, 16 COLUMNS) ---
 def get_sheets():
     print("Connecting to Google Sheets ('MLB' Tab)...")
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
@@ -118,8 +118,7 @@ def ensure_headers(sheet):
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", "Status", "P/L ($)", 
-            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time",
-            "Away Bullpen Math", "Home Bullpen Math", "Python Math Baseline", "AI Contextual Shift"
+            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time"
         ]
         if not existing or not existing[0] or existing[0][0] != "Date": 
             sheet.insert_row(headers, index=1)
@@ -353,7 +352,6 @@ def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigu
     home_prob += 0.015
     math_log.append("HFA: +1.50%")
     
-    # HARD CAPPED to enforce realistic market baseline probabilities
     home_prob = max(0.40, min(0.60, home_prob))
     away_prob = 1.0 - home_prob
     
@@ -504,7 +502,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         home_bp_str = home_bp_data.get('status_string', default_bp['status_string'])
         
         game_key = f"{away} @ {home}"
-        matchup_cache[game_key] = {"away_bp": away_bp_str, "home_bp": home_bp_str, "math": math_log}
+        matchup_cache[game_key] = {"math": math_log}
 
         game_copy = dict(game)
         game_copy["matchup_context"] = {
@@ -602,7 +600,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
             except Exception: time.sleep(5)
     return {"validations": [], "mlb_tab_picks": []}
 
-# --- 8. MAIN EXECUTION (STRICTLY MLB TAB) ---
+# --- 8. MAIN EXECUTION (STRICTLY 16 COLUMNS ON MLB TAB) ---
 def main():
     spreadsheet, mlb_sheet = get_sheets()
     ensure_headers(mlb_sheet)
@@ -651,10 +649,10 @@ def main():
                         mlb_sheet.update_cell(row_idx, 12, 0.0)
                         if reason: mlb_sheet.update_cell(row_idx, 13, reason)
                         mlb_sheet.update_cell(row_idx, 2, current_time_str)
-                    time.sleep(0.5) # Rate-limit protection
+                    time.sleep(0.5)
             except Exception: pass
 
-    # Write new picks exclusively to MLB tab with rate-limit protection
+    # Write new picks strictly to the 16 original columns of the MLB tab
     mlb_picks = ai_response.get("mlb_tab_picks", [])
     appended = 0
     existing_rows = mlb_sheet.get_all_values()
@@ -677,27 +675,15 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
         
-        cache_data = {}
-        gemini_game_norm = normalize_text(game)
-        for cached_key, data in matchup_cache.items():
-            cached_teams = [normalize_text(t) for t in cached_key.split(" @ ")]
-            if len(cached_teams) == 2 and cached_teams[0] in gemini_game_norm and cached_teams[1] in gemini_game_norm:
-                cache_data = data
-                break
-
         mlb_sheet.append_row([
             pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
-            str(p.get("start_time", "")).strip(),
-            cache_data.get("away_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
-            cache_data.get("home_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
-            cache_data.get("math", "N/A"),              
-            p.get("ai_contextual_shift", "")            
+            str(p.get("start_time", "")).strip()
         ], value_input_option="USER_ENTERED")
         appended += 1
         existing_signatures.append(sig)
-        time.sleep(0.5) # Rate-limit protection
+        time.sleep(0.5)
             
     print(f"Execution complete! Added {appended} high-EV picks to the 'MLB' tab.")
 
