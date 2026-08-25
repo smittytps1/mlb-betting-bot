@@ -130,7 +130,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. ADVANCED METRICS (NEW) & PROBABLES ---
+# --- 2. ADVANCED METRICS & PROBABLES ---
 def fetch_team_advanced_metrics():
     metrics_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -165,6 +165,8 @@ def fetch_team_advanced_metrics():
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
+    
+    # 1. Try ESPN API
     try:
         espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
         if espn_resp.status_code == 200:
@@ -177,8 +179,29 @@ def fetch_today_probable_pitchers(target_date_str):
                     team_id = p.get("team", {}).get("id")
                     for c in competitors:
                         if c.get("id") == team_id or c.get("team", {}).get("id") == team_id:
-                            pitcher_map[match_canonical_team(c.get("team", {}).get("displayName", ""))] = p_name
+                            team_name = match_canonical_team(c.get("team", {}).get("displayName", ""))
+                            if team_name: pitcher_map[team_name] = p_name
     except Exception: pass
+
+    # 2. Try MLB Stats API as a fallback
+    try:
+        mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
+        mlb_resp = requests.get(mlb_url, headers=headers, timeout=10)
+        if mlb_resp.status_code == 200:
+            dates = mlb_resp.json().get("dates", [])
+            if dates:
+                for game in dates[0].get("games", []):
+                    teams = game.get("teams", {})
+                    for side in ["away", "home"]:
+                        team_data = teams.get(side, {})
+                        canonical = match_canonical_team(team_data.get("team", {}).get("name", ""))
+                        if canonical and (canonical not in pitcher_map or "TBD" in pitcher_map[canonical]):
+                            pitcher_info = team_data.get("probablePitcher", {})
+                            if pitcher_info:
+                                p_name = pitcher_info.get("fullName", "TBD")
+                                pitcher_map[canonical] = p_name
+    except Exception: pass
+
     return pitcher_map
 
 # --- 3. BULLPEN & PYTHON MATH ENGINE ---
@@ -440,14 +463,15 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         if commence_time_str:
             try:
                 dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
-                if dt_utc < current_utc: continue
+                if dt_utc < current_utc:
+                    print(f"  [Time Filter] Dropping {away} @ {home} (Game Already Started at {dt_utc})")
+                    continue
                 game_time_et = dt_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception: pass
 
         h_pitcher = probable_pitchers.get(home, "TBD")
         a_pitcher = probable_pitchers.get(away, "TBD")
-        if "TBD" in h_pitcher or "TBD" in a_pitcher: continue
-            
+        
         home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics)
         game_copy = dict(game)
         game_copy["matchup_context"] = {
@@ -460,6 +484,8 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
             "home_win_prob_baseline": f"{round(home_prob * 100, 1)}%",
             "calculation_log": math_log
         }
+        
+        print(f"  [Math Baseline] {away} ({round(away_prob * 100, 1)}%) @ {home} ({round(home_prob * 100, 1)}%)")
         valid.append(game_copy)
     return valid
 
@@ -478,7 +504,11 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
     formatted_games = format_matchups(odds_data, probable_pitchers, fatigue_ratings, advanced_metrics)
-    if not formatted_games: return {"validations": [], "new_picks": []}
+    if not formatted_games: 
+        print("WARNING: 0 games passed the pre-game filters.")
+        return {"validations": [], "new_picks": []}
+        
+    print(f"Sending {len(formatted_games)} mathematically scored matchups to the AI for Contextual Adjustment...")
 
     prompt = f"""
     You are a Bounded Contextual Adjuster. Python has already calculated the strict mathematical baseline win probability for these MLB matchups based on Bullpen Load, OPS, and WHIP.
@@ -536,11 +566,20 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
     
+    print("Fetching starting pitchers...")
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
+    
+    print("Fetching advanced statistical metrics...")
     advanced_metrics = fetch_team_advanced_metrics()
+    
+    print("Calculating rolling bullpen fatigue...")
     fatigue_data = fetch_recent_bullpen_usage(days_back=2)
+    
+    print("Fetching live sportsbook odds...")
     odds = fetch_mlb_odds(odds_key)
-    if not odds: return
+    if not odds: 
+        print("Error: No odds returned from API.")
+        return
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(odds, memory, open_picks, fatigue_data, probable_pitchers, advanced_metrics)
