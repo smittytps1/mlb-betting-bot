@@ -87,7 +87,6 @@ def get_sheets():
     client = gspread.service_account_from_dict(json.loads(service_account_str), scopes=scopes)
     spreadsheet = client.open("MLB AI Betting Tracker")
     
-    # Target the 'Daily' tab as requested
     try:
         daily_sheet = spreadsheet.worksheet("Daily")
     except Exception:
@@ -229,7 +228,6 @@ def fetch_recent_bullpen_usage(days_back=2):
         else:
             status = "FRESH"
 
-        # Clean, explicit format for Columns Q and R
         status_string = f"Status: {status} | Load Index: {load} | Relief Apps: {apps} | Total Pitches (2 Days): {total_p}"
         objective_ratings[team] = {
             "status_string": status_string,
@@ -403,7 +401,7 @@ def fetch_mlb_odds(odds_key):
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics, memory, today_date_str):
     valid = []
     matchup_cache = {}  
-    current_utc = datetime.now(ZoneInfo("UTC"))
+    current_utc = datetime.now(ZoneInfo("America/New_York"))
     
     for game in odds_data:
         raw_home = game.get("home_team", "")
@@ -482,13 +480,13 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
     === ACTIVE PENDING PICKS TO RE-EVALUATE ===
     {json.dumps(open_picks, indent=2)}
 
-    STRICT RULES & MANDATORY MULTI-MARKET OUTPUT:
+    STRICT RULES & MANDATORY 3-MARKET TABULATION:
     1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
-    2. MANDATORY 3 PICKS PER GAME: For EVERY game provided in today's matchups, you MUST generate and output exactly **THREE separate picks**:
+    2. MANDATORY 3 PICKS PER GAME: For EVERY game provided in today's matchups, you MUST generate and output exactly **THREE separate picks** in the `new_picks` array:
        - Pick 1: **Moneyline** (select the side with the greatest EV).
        - Pick 2: **Run Line / Spread** (select the side with the greatest EV, e.g., Team -1.5 or Team +1.5).
-       - Pick 3: **Total Over/Under** (select Over or Under based on the Python projected total vs sportsbook line).
-    3. THE LEASH (±5.0% MAX): Adjust win/total probabilities by a maximum of ± 5.0%.
+       - Pick 3: **Total Over/Under** (select Over or Under based on Python's projected total vs sportsbook line).
+    3. THE LEASH (±5.0% MAX): Adjust probabilities by a maximum of ± 5.0%.
     4. THE 11 PERCENT EV THRESHOLD: Recommend picks where final model probability provides an Expected Value (EV) >= 11.0%.
     5. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
 
@@ -622,7 +620,7 @@ def main():
         appended += 1
         existing_game_titles.append(unique_pick_signature)
             
-    print(f"Execution complete! Added {appended} new multi-market picks to the 'Daily' tab.")
+    print(f"Execution complete! Added {appended} multi-market picks to the 'Daily' tab.")
 
 if __name__ == "__main__":
     main()
