@@ -94,7 +94,8 @@ def ensure_headers(sheet):
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", "Status", "P/L ($)", 
-            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time"
+            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time",
+            "Away Bullpen", "Home Bullpen", "Model Prob Calc"
         ]
         
         if not existing or not existing[0] or existing[0][0] != "Date": 
@@ -103,6 +104,12 @@ def ensure_headers(sheet):
             current_headers = existing[0]
             if "Game Start Time" not in current_headers:
                 sheet.update_cell(1, 16, "Game Start Time")
+            if "Away Bullpen" not in current_headers:
+                sheet.update_cell(1, 17, "Away Bullpen")
+            if "Home Bullpen" not in current_headers:
+                sheet.update_cell(1, 18, "Home Bullpen")
+            if "Model Prob Calc" not in current_headers:
+                sheet.update_cell(1, 19, "Model Prob Calc")
     except Exception as e: 
         print(f"Header notice: {e}")
 
@@ -646,6 +653,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that calculates to an Expected Value (EV) of 11.0% or higher. There is NO CAP on the number of picks. If 10 games clear the 11.0% threshold, output all 10. If zero games clear it, output 0.
     7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
     8. ZERO DATA FABRICATION: Under no circumstances may you invent, estimate, or hallucinate backend load numbers, win percentages, or pitch counts. If you quote a Weighted Backend Load or B2B Burn status in your reasoning, it MUST be extracted verbatim from the 'Bullpen' string provided in the matchup data.
+    9. TRANSPARENCY COLUMNS: You must populate "away_bullpen" and "home_bullpen" with the exact Bullpen Status text provided in the matchup data for both teams. For "model_prob_calc", provide a brief mathematical explanation of how the Implied Probability was adjusted to reach your Model Probability based on the factor weights (e.g., "Base implied prob 50% + 5% adjustment for 1.2x weight on Away Bullpen Fatigue").
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -658,7 +666,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reason": "<tight summary>"
+          "reason": "<tight summary>",
+          "away_bullpen": "<verbatim away bullpen status text>",
+          "home_bullpen": "<verbatim home bullpen status text>",
+          "model_prob_calc": "<step-by-step mathematical explanation>"
         }}
       ],
       "new_picks": [
@@ -673,7 +684,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "model_prob": "58.0%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<tight summary highlighting specific drivers including start times>"
+          "reasoning": "<tight summary highlighting specific drivers including start times>",
+          "away_bullpen": "<verbatim away bullpen status text>",
+          "home_bullpen": "<verbatim home bullpen status text>",
+          "model_prob_calc": "<step-by-step mathematical explanation>"
         }}
       ]
     }}
@@ -762,11 +776,17 @@ def main():
                         sheet.update_cell(row_idx, 10, qk_units)
                     if "high_agreement" in val and val["high_agreement"]: sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
                     if reason: sheet.update_cell(row_idx, 13, reason)
+                    if "away_bullpen" in val and val["away_bullpen"]: sheet.update_cell(row_idx, 17, val["away_bullpen"])
+                    if "home_bullpen" in val and val["home_bullpen"]: sheet.update_cell(row_idx, 18, val["home_bullpen"])
+                    if "model_prob_calc" in val and val["model_prob_calc"]: sheet.update_cell(row_idx, 19, val["model_prob_calc"])
                     sheet.update_cell(row_idx, 2, current_time_str)
                 elif action == "REJECTED":
                     sheet.update_cell(row_idx, 11, "REJECTED")
                     sheet.update_cell(row_idx, 12, 0.0)
                     if reason: sheet.update_cell(row_idx, 13, reason)
+                    if "away_bullpen" in val and val["away_bullpen"]: sheet.update_cell(row_idx, 17, val["away_bullpen"])
+                    if "home_bullpen" in val and val["home_bullpen"]: sheet.update_cell(row_idx, 18, val["home_bullpen"])
+                    if "model_prob_calc" in val and val["model_prob_calc"]: sheet.update_cell(row_idx, 19, val["model_prob_calc"])
                     sheet.update_cell(row_idx, 2, current_time_str)
 
                 print(f"Row {row_idx} evaluated as {action}.")
@@ -805,7 +825,10 @@ def main():
             pick_date, current_time_str, game, bet_type, pick, int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, reasoning, "NEW", p.get("high_agreement", "No"),
-            start_time_out
+            start_time_out,
+            p.get("away_bullpen", ""),
+            p.get("home_bullpen", ""),
+            p.get("model_prob_calc", "")
         ], value_input_option="USER_ENTERED")
         appended += 1
             
