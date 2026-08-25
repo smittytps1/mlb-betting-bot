@@ -50,7 +50,7 @@ def match_canonical_team(name_str):
     if not name_str: return ""
     cleaned = str(name_str).strip().lower()
     cleaned_norm = normalize_text(cleaned)
-    for canonical, aliases in MLB_TEAM_ALIitems():
+    for canonical, aliases in MLB_TEAM_ALIASES.items():
         for alias in aliases:
             if alias == cleaned or normalize_text(alias) == cleaned_norm or alias in cleaned or cleaned in alias:
                 return canonical.title()
