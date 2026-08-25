@@ -159,7 +159,7 @@ def fetch_today_probable_pitchers(target_date_str):
     except Exception: pass
     return pitcher_map
 
-# --- 3. BULLPEN & ACTIVE SELF-LEARNING PYTHON MATH ENGINE ---
+# --- 3. FULL-HIERARCHY BULLPEN & SELF-LEARNING MATH ENGINE ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
@@ -180,24 +180,35 @@ def fetch_team_high_leverage_hierarchies():
     try:
         teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
         if teams_resp.status_code != 200: return {}
+        
         for t in teams_resp.json().get("teams", []):
             team_id = t.get("id")
             canonical_name = match_canonical_team(t.get("name", ""))
             if not canonical_name: continue
+
             stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
             stats_resp = requests.get(stats_url, headers=headers, timeout=5)
             if stats_resp.status_code != 200: continue
-            closers = []
+
+            closers, setup_men = [], []
             for roster_item in stats_resp.json().get("roster", []):
                 person = roster_item.get("person", {})
                 p_name = person.get("fullName", "")
                 for s in person.get("stats", []):
                     if s.get("type", {}).get("displayName") == "season":
                         for split in s.get("splits", []):
-                            saves = int(split.get("stat", {}).get("saves", 0))
+                            stat_data = split.get("stat", {})
+                            saves = int(stat_data.get("saves", 0))
+                            holds = int(stat_data.get("holds", 0))
                             if saves >= 2: closers.append((p_name, saves))
+                            if holds >= 2: setup_men.append((p_name, holds))
+
             closers.sort(key=lambda x: x[1], reverse=True)
-            high_leverage_map[canonical_name] = {"closer": closers[0][0] if closers else "Unknown Closer"}
+            setup_men.sort(key=lambda x: x[1], reverse=True)
+            high_leverage_map[canonical_name] = {
+                "closer": closers[0][0] if closers else "Unknown Closer",
+                "setup": [s[0] for s in setup_men[:2]]
+            }
     except Exception: pass
     return high_leverage_map
 
@@ -227,10 +238,14 @@ def fetch_recent_bullpen_usage(days_back=2):
                 if not canonical: continue
 
                 if canonical not in team_stats:
-                    team_stats[canonical] = {"closer_dates": set(), "closer_pitches": 0, "setup_pitches": 0, "middle_pitches": 0}
+                    team_stats[canonical] = {
+                        "closer_dates": set(), "setup_dates": set(),
+                        "closer_pitches": 0, "setup_pitches": 0, "middle_pitches": 0
+                    }
 
-                hierarchy = hl_hierarchy.get(canonical, {"closer": ""})
+                hierarchy = hl_hierarchy.get(canonical, {"closer": "", "setup": []})
                 closer_name = hierarchy.get("closer")
+                setup_names = hierarchy.get("setup", [])
                 pitchers = team_box.get("pitchers", [])
                 players = team_box.get("players", {})
 
@@ -244,17 +259,26 @@ def fetch_recent_bullpen_usage(days_back=2):
                         if p_name == closer_name:
                             team_stats[canonical]["closer_dates"].add(target_date)
                             team_stats[canonical]["closer_pitches"] += pitches
+                        elif p_name in setup_names:
+                            team_stats[canonical]["setup_dates"].add(target_date)
+                            team_stats[canonical]["setup_pitches"] += pitches
                         else:
                             team_stats[canonical]["middle_pitches"] += pitches
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        cp, mp = stats["closer_pitches"], stats["middle_pitches"]
-        load = (cp * 3.0) + (mp * 1.0)
+        cp, sp, mp = stats["closer_pitches"], stats["setup_pitches"], stats["middle_pitches"]
+        load = (cp * 3.0) + (sp * 2.0) + (mp * 1.0)
         c_b2b = len(stats["closer_dates"]) >= 2
-        status = f"TAXED (Closer B2B: {c_b2b})" if (c_b2b or load >= 100) else "FRESH"
+        s_b2b = len(stats["setup_dates"]) >= 2
+
+        if c_b2b or load >= 120: status = f"TAXED (Closer B2B: {c_b2b})"
+        elif s_b2b or load >= 70: status = "MODERATELY WORKED"
+        else: status = "FRESH"
+
+        breakdown = f"(Closer: {cp}x3) + (Setup: {sp}x2) + (Middle: {mp}x1)"
         objective_ratings[team] = {
-            "status_string": f"Status: {status} | Load: {round(load, 1)}",
+            "status_string": f"Status: {status} | Load: {round(load, 1)} | Math: {breakdown}",
             "load": load,
             "closer_b2b": c_b2b
         }
@@ -265,7 +289,6 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     math_log = []
     weights = memory.get("reasoning_factor_weights", {})
     
-    # Apply self-learning weights from bot_memory.json
     bp_weight = weights.get("bullpen_depth_and_fatigue", {}).get("weight", 1.0)
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
@@ -299,7 +322,7 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     home_prob = max(0.05, min(0.95, home_prob))
     return home_prob, 1.0 - home_prob, " | ".join(math_log)
 
-# --- 4. AUTO-GRADING & ROBUST ANTI-DUPLICATION ---
+# --- 4. AUTO-GRADING & ANTI-DUPLICATION ---
 def auto_grade_pending_bets(sheet, odds_key):
     try:
         rows = sheet.get_all_values()
@@ -307,7 +330,6 @@ def auto_grade_pending_bets(sheet, odds_key):
         headers = [h.strip() for h in rows[0]]
         status_idx = headers.index("Status")
         game_idx = headers.index("Game")
-        bet_type_idx = headers.index("Bet Type / Sportsbook")
         pick_idx = headers.index("Pick")
         odds_idx = headers.index("Odds")
         units_idx = headers.index("Units")
@@ -375,10 +397,10 @@ def get_today_existing_picks(sheet, today_date_str):
     existing = []
     for r in rows[1:]:
         if len(r) > 10 and str(r[0]).strip() == today_date_str and str(r[10]).strip().upper() == "PENDING":
-            existing.append(str(r[2]).strip()) # Game title
+            existing.append(str(r[2]).strip())
     return existing
 
-# --- 5. MATCHUP FORMATTING & ANTI-DUPLICATION CHECK ---
+# --- 5. MATCHUP FORMATTING ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -404,8 +426,8 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         
         home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
-        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH')
-        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH')
+        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
+        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
         
         game_key = f"{away} @ {home}"
         matchup_cache[game_key] = {"away_bp": away_bp_str, "home_bp": home_bp_str, "math": math_log}
@@ -500,9 +522,7 @@ def main():
     formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory)
     if not formatted_games: return
 
-    # Pull existing pending games to completely prevent duplicates
     existing_games = get_today_existing_picks(sheet, today_date_str)
-    
     ai_response = generate_picks_and_validations(formatted_games, memory)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
@@ -532,7 +552,7 @@ def main():
             p.get("ai_contextual_shift", "")            
         ], value_input_option="USER_ENTERED")
         appended += 1
-        existing_games.append(game) # Prevent multi-append within the same run
+        existing_games.append(game)
             
     print(f"Execution complete! Added {appended} new pick(s).")
 
