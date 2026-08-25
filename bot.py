@@ -86,7 +86,6 @@ def poisson_probability(lam, k):
     return (math.exp(-lam) * (lam ** int(k))) / math.factorial(int(k))
 
 def calculate_runline_prob(lam_fav, lam_dog):
-    """Calculates exact Poisson probability of a -1.5 runline cover."""
     prob_cover = 0.0
     for f in range(2, 21):
         for d in range(0, f - 1):
@@ -94,21 +93,17 @@ def calculate_runline_prob(lam_fav, lam_dog):
     return max(0.01, min(0.99, prob_cover))
 
 def calculate_total_prob(lam_total, line, is_over=True):
-    """Calculates exact cumulative Poisson probability for Over/Under lines."""
     prob_exact = 0.0
-    # Fixed syntax error: explicitly using float conversion instead of malformed float literal
     numeric_line = float(line)
-    
     for total_runs in range(0, 30):
         p = poisson_probability(lam_total, total_runs)
         if is_over and total_runs > numeric_line:
             prob_exact += p
         elif not is_over and total_runs < numeric_line:
             prob_exact += p
-            
     return max(0.05, min(0.95, prob_exact))
 
-# --- 1. GOOGLE SHEETS SETUP (STRICTLY MLB TAB, 16 COLUMNS) ---
+# --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
     print("Connecting to Google Sheets ('MLB' Tab)...")
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
@@ -125,7 +120,6 @@ def get_sheets():
     
     spreadsheet = client.open("MLB AI Betting Tracker")
     mlb_sheet = spreadsheet.worksheet("MLB")
-        
     return spreadsheet, mlb_sheet
 
 def ensure_headers(sheet):
@@ -148,6 +142,34 @@ def ensure_evolution_sheet(spreadsheet):
             evo_sheet.insert_row(["Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"], index=1)
         return evo_sheet
     except Exception: return None
+
+def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
+    try:
+        evo_sheet = ensure_evolution_sheet(spreadsheet)
+        if not evo_sheet: return
+        factors = memory.get("reasoning_factor_weights", {})
+        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()]) if factors else "Standard (1.0x)"
+        evo_sheet.append_row([
+            time_str, sport_label, memory.get("total_bets", 0), memory.get("win_rate", "0%"), 
+            memory.get("net_profit_dollars", 0.0), weights_str, 
+            memory.get("learnings_and_adjustments", "Maintain balanced multi-factor evaluation."), summary
+        ])
+    except Exception as e:
+        print(f"Notice while logging to Evolution tab: {e}")
+
+def fetch_past_evolution_learnings(spreadsheet):
+    try:
+        evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
+        rows = evo_sheet.get_all_values()
+        if len(rows) <= 1: return "No prior evolution history recorded yet."
+        recent_rows = rows[-10:] 
+        history_summary = []
+        for r in recent_rows:
+            if len(r) >= 8:
+                history_summary.append(f"Date: {r[0]} | Bets: {r[2]} | Win Rate: {r[3]} | Net P/L: ${r[4]} | Weights: {r[5]} | Notes: {r[7]}")
+        return "\n".join(history_summary)
+    except Exception:
+        return "Evolution tab unavailable."
 
 # --- 2. ADVANCED METRICS & API SCRAPERS ---
 def fetch_team_advanced_metrics():
@@ -319,6 +341,67 @@ def load_memory():
             "starting_pitcher_expected_metrics": {"weight": 1.0}
         }
     }
+
+def calculate_factor_weight(wins, losses):
+    total = wins + losses
+    if total < 3: return 1.0, "Baseline sample size."
+    win_rate = wins / total
+    if win_rate >= 0.65: return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor."
+    elif win_rate <= 0.40: return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize."
+    else: return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%)."
+
+def update_memory_from_sheet(sheet, memory):
+    try:
+        rows = sheet.get_all_values()
+        if len(rows) <= 1: return memory
+
+        headers = [h.strip() for h in rows[0]]
+        status_idx = headers.index("Status") if "Status" in headers else 10
+        pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
+        reason_idx = headers.index("Reasoning") if "Reasoning" in headers else 12
+
+        wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
+        losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
+        total = wins + losses
+
+        factors = memory.get("reasoning_factor_weights", {})
+        for key in factors:
+            factors[key]["wins"] = 0
+            factors[key]["losses"] = 0
+
+        keywords_map = {
+            "starting_pitcher_expected_metrics": ["whipp", "sp", "era", "fip", "strikeout"],
+            "platoon_and_lineup_splits": ["ops", "iso", "lineup", "platoon"],
+            "bullpen_depth_and_fatigue": ["bullpen", "load", "taxed", "relief", "closer"]
+        }
+
+        for r in rows[1:]:
+            if len(r) > max(status_idx, reason_idx):
+                status = str(r[status_idx]).strip().upper()
+                reasoning = str(r[reason_idx]).lower()
+                if status in ["WIN", "LOSS"]:
+                    for factor_key, kws in keywords_map.items():
+                        if any(kw in reasoning for kw in kws):
+                            if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
+                            if status == "WIN": factors[factor_key]["wins"] += 1
+                            else: factors[factor_key]["losses"] += 1
+
+        for factor_key, data in factors.items():
+            w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
+            data["weight"] = w_val
+            data["instruction"] = inst
+
+        if total > 0:
+            memory["total_bets"] = total
+            memory["wins"] = wins
+            memory["losses"] = losses
+            memory["win_rate"] = f"{round((wins / total) * 100, 1)}%"
+            memory["net_profit_dollars"] = round(sum(float(r[pl_idx] or 0.0) for r in rows[1:] if len(r) > pl_idx and r[pl_idx]), 2)
+        
+        with open("bot_memory.json", "w") as f: json.dump(memory, f, indent=2)
+    except Exception as e:
+        print(f"Memory update notice: {e}")
+    return memory
 
 # --- 4. THE 6-METRIC BASELINE MATH ENGINE ---
 def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigue_data, advanced_metrics, memory):
@@ -537,7 +620,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 7. AI SYNTHESIS ---
+# --- 7. AI SYNTHESIS WITH EVOLUTION TAB FEEDBACK LOOP ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -555,12 +638,15 @@ def parse_json_from_response(response):
     except Exception:
         return {}
 
-def generate_mlb_picks(formatted_games, open_picks, memory):
+def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions to ground your projections for Moneylines, Run Lines, and Totals. Do NOT output any probability above 65% for any market.
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions and a 6-metric baseline. Do NOT output any probability above 65% for any market.
+
+    === HISTORICAL REPORT CARD & EVOLUTION LEARNINGS (STUDY THIS BEFORE PICKING) ===
+    {past_learnings_text}
 
     === TODAY'S MATCHUPS, MARKET ODDS & BASELINES ===
     {json.dumps(formatted_games, indent=2)}
@@ -574,7 +660,8 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
     3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
     4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Fully evaluate ALL markets (Moneyline, Run Line/Spreads, and Totals Over/Under). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
     5. MAX-EV SIDE SELECTION: If multiple markets for the same game (e.g. Moneyline and Run Line) both clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both for the same team.
-    6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
+    6. MANDATORY 6-METRIC REASONING BREAKDOWN: In the 'reasoning' field of every pick, you MUST explicitly itemize the math based on the Python baseline log, breaking down: (1) Starting Pitcher WHIP, (2) Team OPS, (3) ISO Contact Quality, (4) Bullpen Load/Fatigue, (5) Situational Schedule Fatigue, and (6) HFA. This is critical for future memory learning.
+    7. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -600,7 +687,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "High-EV justification across metrics",
+          "reasoning": "6-metric itemized breakdown: SP WHIP ([val]), OPS ([val]), ISO ([val]), Bullpen Load ([val]), Schedule Fatigue ([val]), HFA (+1.5%), leading to model probability X%.",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
@@ -616,18 +703,24 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
             except Exception: time.sleep(5)
     return {"validations": [], "mlb_tab_picks": []}
 
-# --- 8. MAIN EXECUTION (STRICTLY 16 COLUMNS ON MLB TAB) ---
+# --- 8. MAIN EXECUTION ---
 def main():
     spreadsheet, mlb_sheet = get_sheets()
     ensure_headers(mlb_sheet)
+    ensure_evolution_sheet(spreadsheet)
     
     odds_key = os.environ.get("ODDS_API_KEY")
-    auto_grade_pending_bets(mlb_sheet, odds_key)
+    graded_count = auto_grade_pending_bets(mlb_sheet, odds_key)
     
     memory = load_memory()
+    updated_memory = update_memory_from_sheet(mlb_sheet, memory)
+    
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
     
+    past_learnings_text = fetch_past_evolution_learnings(spreadsheet)
+    update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
+
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     advanced_metrics = fetch_team_advanced_metrics()
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
@@ -635,13 +728,13 @@ def main():
     odds = fetch_mlb_odds(odds_key)
     if not odds: return
 
-    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory, today_date_str)
+    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, updated_memory, today_date_str)
     if not formatted_games:
         print("No eligible games found for today.")
         return
 
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
-    ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, memory)
+    ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
     
     # Process Validations with Rate-Limit Throttling (0.5s pause)
     validations = ai_response.get("validations", [])
