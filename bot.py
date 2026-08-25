@@ -122,7 +122,7 @@ def fetch_team_advanced_metrics():
                 canonical = match_canonical_team(t.get("name", ""))
                 if not canonical: continue
                 
-                metrics_map[canonical] = {"ops": 0.720, "whip": 1.30}
+                metrics_map[canonical] = {"ops": 0.720, "whip": 1.30, "runs_per_game": 4.5}
                 stats_url = f"https://statsapi.mlb.com/api/v1/teams/{t_id}/stats?stats=season&group=hitting,pitching"
                 stats_resp = requests.get(stats_url, headers=headers, timeout=5)
                 
@@ -134,6 +134,7 @@ def fetch_team_advanced_metrics():
                         stat_data = splits[0].get("stat", {})
                         if group_name == "hitting":
                             metrics_map[canonical]["ops"] = float(stat_data.get("ops", ".720"))
+                            metrics_map[canonical]["runs_per_game"] = float(stat_data.get("runsScoredPerGame", "4.5"))
                         elif group_name == "pitching":
                             metrics_map[canonical]["whip"] = float(stat_data.get("whip", "1.30"))
     except Exception: pass
@@ -316,7 +317,13 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     math_log.append("HFA: +1.50%")
     
     home_prob = max(0.05, min(0.95, home_prob))
-    return home_prob, 1.0 - home_prob, " | ".join(math_log)
+    
+    # NEW: Calculate Projected Totals for the Over/Under analysis
+    a_gpg = advanced_metrics.get(away, {}).get("runs_per_game", 4.5)
+    h_gpg = advanced_metrics.get(home, {}).get("runs_per_game", 4.5)
+    projected_total = round(a_gpg + h_gpg, 1)
+    
+    return home_prob, 1.0 - home_prob, projected_total, " | ".join(math_log)
 
 # --- 4. AUTO-GRADING & ANTI-DUPLICATION ---
 def auto_grade_pending_bets(sheet, odds_key):
@@ -326,6 +333,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         headers = [h.strip() for h in rows[0]]
         status_idx = headers.index("Status")
         game_idx = headers.index("Game")
+        bet_type_idx = headers.index("Bet Type / Sportsbook")
         pick_idx = headers.index("Pick")
         odds_idx = headers.index("Odds")
         units_idx = headers.index("Units")
@@ -342,6 +350,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         for row_idx, r in pending_rows:
             pick_date_str = str(r[0]).strip()
             game_title = str(r[game_idx]).strip()
+            bet_type = str(r[bet_type_idx]).strip().lower()
             pick_str = str(r[pick_idx]).strip()
             try: odds = float(r[odds_idx])
             except: odds = -110.0
@@ -366,11 +375,30 @@ def auto_grade_pending_bets(sheet, odds_key):
                     if not scores or len(scores) < 2: continue
                     home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                     away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+                    total_score = home_score + away_score
                     
-                    winner = home_team if home_score > away_score else away_team
-                    status = "WIN" if match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() else "LOSS"
-                    profit = ((odds / 100.0) * 100.0 * units) if (status == "WIN" and odds > 0) else ((100.0 / abs(odds)) * 100.0 * units) if status == "WIN" else (-100.0 * units)
-                    updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
+                    status = "PENDING"
+                    if "moneyline" in bet_type:
+                        winner = home_team if home_score > away_score else away_team
+                        status = "WIN" if match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() else "LOSS"
+                    elif "spread" in bet_type or "run line" in bet_type:
+                        favored_team = pick_str.rsplit(' ', 1)[0]
+                        try: spread_val = float(pick_str.split(' ')[-1])
+                        except: spread_val = 0.0
+                        h_covered = (home_score + spread_val) > away_score if match_canonical_team(favored_team).lower() == match_canonical_team(home_team).lower() else (away_score + spread_val) > home_score
+                        status = "WIN" if h_covered else "LOSS"
+                    elif "total" in bet_type or "over" in bet_type or "under" in bet_type:
+                        try: line_val = float(pick_str.split(' ')[-1])
+                        except: line_val = 0.0
+                        is_over = "over" in pick_str.lower()
+                        if is_over:
+                            status = "WIN" if total_score > line_val else "LOSS" if total_score < line_val else "PENDING"
+                        else:
+                            status = "WIN" if total_score < line_val else "LOSS" if total_score > line_val else "PENDING"
+
+                    if status != "PENDING":
+                        profit = ((odds / 100.0) * 100.0 * units) if (status == "WIN" and odds > 0) else ((100.0 / abs(odds)) * 100.0 * units) if status == "WIN" else (-100.0 * units)
+                        updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
                     break
         if updates: sheet.batch_update(updates)
     except Exception: pass
@@ -426,7 +454,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         h_pitcher = probable_pitchers.get(home, "TBD")
         a_pitcher = probable_pitchers.get(away, "TBD")
         
-        home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
+        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
         away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
         home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
@@ -443,6 +471,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         game_copy["python_math_baseline"] = {
             "away_win_prob_baseline": f"{round(away_prob * 100, 1)}%",
             "home_win_prob_baseline": f"{round(home_prob * 100, 1)}%",
+            "projected_total_runs": projected_total,
             "calculation_log": math_log
         }
         valid.append(game_copy)
@@ -454,7 +483,6 @@ def parse_json_from_response(response):
     if hasattr(response, "candidates") and response.candidates:
         raw_text = "".join([p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text])
     
-    # Safely extract JSON via regex to prevent string literal syntax errors
     json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw_text.strip(), re.DOTALL)
     if json_match:
         try:
@@ -462,7 +490,6 @@ def parse_json_from_response(response):
         except Exception:
             pass
             
-    # Fallback cleanup
     clean_text = raw_text.replace("```json", "").replace("```", "").strip()
     try:
         return json.loads(clean_text)
@@ -487,9 +514,10 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
 
     STRICT RULES:
     1. THE TIGHT LEASH (±5.0% MAX): Adjust baselines by a maximum of ± 5.0%.
-    2. ANTI-HYPE & OBJECTIVITY: Disregard media hype. Base synthesis on hard data.
-    3. THE 11 PERCENT EV THRESHOLD: Recommend new picks where final `model_prob` gives an EV of 11.0% or higher.
-    4. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
+    2. NO ARTIFICIAL EV MANIPULATION: Calculate true Expected Value strictly as [(Model Prob * Decimal Odds) - 1]. DO NOT force or reverse-engineer the probability just to hit the 11% threshold. If a pick's true EV falls short, DO NOT pick it. Only pick games that organically reach >= 11.0% EV.
+    3. MULTI-MARKET EVALUATION: You MUST evaluate all available markets provided in the data: Moneyline, Run Line (Spread), and Totals (Over/Under). Choose the best value bet type per game.
+    4. NO PICK LIMIT: Evaluate every single game on the slate. Output as many picks as legitimately clear the 11.0% EV threshold across any of the 3 markets.
+    5. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -508,8 +536,8 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
           "date": "YYYY-MM-DD",
           "start_time": "YYYY-MM-DD HH:MM PM EDT",
           "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)",
-          "pick": "Team Name",
+          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (Caesars)",
+          "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
           "odds": -110,
           "implied_prob": "52.4%",
           "model_prob": "55.0%",
@@ -582,12 +610,15 @@ def main():
     # Process New Picks (with anti-duplication block)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
-    existing_game_titles = [p["game"] for p in open_picks_detailed]
+    existing_game_titles = [f"{p['game']} | {p['bet_type']}" for p in open_picks_detailed]
     
     for p in new_picks:
         game = str(p.get("game", "")).strip()
-        if game in existing_game_titles:
-            print(f"  [Duplicate Blocked] Skipping {game} (Already logged as PENDING).")
+        bet_type_label = str(p.get("bet_type", "")).strip()
+        unique_pick_signature = f"{game} | {bet_type_label}"
+        
+        if unique_pick_signature in existing_game_titles:
+            print(f"  [Duplicate Blocked] Skipping {unique_pick_signature} (Already logged as PENDING).")
             continue
 
         pick_date = str(p.get("date", today_date_str)).strip()
@@ -599,7 +630,7 @@ def main():
         cache_data = matchup_cache.get(game, {})
 
         sheet.append_row([
-            pick_date, current_time_str, game, str(p.get("bet_type", "")).strip(), str(p.get("pick", "")).strip(), int(round(odds_val)),
+            pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
             str(p.get("start_time", "")).strip(),
@@ -609,7 +640,7 @@ def main():
             p.get("ai_contextual_shift", "")            
         ], value_input_option="USER_ENTERED")
         appended += 1
-        existing_game_titles.append(game)
+        existing_game_titles.append(unique_pick_signature)
             
     print(f"Execution complete! Validated existing picks and added {appended} new pick(s).")
 
