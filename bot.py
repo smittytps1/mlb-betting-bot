@@ -81,12 +81,10 @@ def compute_quarter_kelly_units(odds, model_prob_str):
 
 # --- POISSON DISTRIBUTION MATH ENGINE ---
 def poisson_probability(lam, k):
-    """Calculates the probability of exactly k occurrences given expected lambda."""
     if lam <= 0: return 0.0
     return (math.exp(-lam) * (lam ** int(k))) / math.factorial(int(k))
 
 def calculate_runline_prob(lam_fav, lam_dog):
-    """Calculates the probability of a team winning by 2 or more runs (-1.5 cover)."""
     prob_cover = 0.0
     for f in range(2, 21):
         for d in range(0, f - 1):
@@ -96,7 +94,7 @@ def calculate_runline_prob(lam_fav, lam_dog):
 # --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
     print("Connecting to Google Sheets ('Daily' & 'MLB' Tabs)...")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    scopes = ["[https://www.googleapis.com/auth/spreadsheets](https://www.googleapis.com/auth/spreadsheets)", "[https://www.googleapis.com/auth/drive](https://www.googleapis.com/auth/drive)"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
     client = gspread.service_account_from_dict(json.loads(service_account_str), scopes=scopes)
@@ -137,7 +135,7 @@ def fetch_team_advanced_metrics():
     metrics_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        teams_url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
+        teams_url = "[https://statsapi.mlb.com/api/v1/teams?sportId=1](https://statsapi.mlb.com/api/v1/teams?sportId=1)"
         teams_resp = requests.get(teams_url, headers=headers, timeout=10)
         if teams_resp.status_code == 200:
             for t in teams_resp.json().get("teams", []):
@@ -146,7 +144,7 @@ def fetch_team_advanced_metrics():
                 if not canonical: continue
                 
                 metrics_map[canonical] = {"ops": 0.720, "iso": 0.150, "whip": 1.30, "runs_per_game": 4.5}
-                stats_url = f"https://statsapi.mlb.com/api/v1/teams/{t_id}/stats?stats=season&group=hitting,pitching"
+                stats_url = f"[https://statsapi.mlb.com/api/v1/teams/](https://statsapi.mlb.com/api/v1/teams/){t_id}/stats?stats=season&group=hitting,pitching"
                 stats_resp = requests.get(stats_url, headers=headers, timeout=5)
                 
                 if stats_resp.status_code == 200:
@@ -169,13 +167,13 @@ def fetch_team_advanced_metrics():
 def fetch_pitcher_season_stats(pitcher_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        search_url = f"https://statsapi.mlb.com/api/v1/people/search?names={pitcher_name}&sportIds=1"
+        search_url = f"[https://statsapi.mlb.com/api/v1/people/search?names=](https://statsapi.mlb.com/api/v1/people/search?names=){pitcher_name}&sportIds=1"
         search_resp = requests.get(search_url, headers=headers, timeout=5)
         if search_resp.status_code == 200:
             people = search_resp.json().get("people", [])
             if people:
                 pid = people[0].get("id")
-                stat_url = f"https://statsapi.mlb.com/api/v1/people/{pid}/stats?stats=season&group=pitching"
+                stat_url = f"[https://statsapi.mlb.com/api/v1/people/](https://statsapi.mlb.com/api/v1/people/){pid}/stats?stats=season&group=pitching"
                 stat_resp = requests.get(stat_url, headers=headers, timeout=5)
                 if stat_resp.status_code == 200:
                     splits = stat_resp.json().get("stats", [])[0].get("splits", [])
@@ -192,7 +190,7 @@ def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
+        espn_resp = requests.get(f"[https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=](https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=){target_date_str.replace('-', '')}", headers=headers, timeout=10)
         if espn_resp.status_code == 200:
             for event in espn_resp.json().get("events", []):
                 comps = event.get("competitions", [])
@@ -209,7 +207,7 @@ def fetch_today_probable_pitchers(target_date_str):
     return pitcher_map
 
 def get_mlb_teams_map():
-    url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
+    url = "[https://statsapi.mlb.com/api/v1/teams?sportId=1](https://statsapi.mlb.com/api/v1/teams?sportId=1)"
     resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
     teams = {}
     if resp.status_code == 200:
@@ -226,7 +224,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     
     for d in range(1, days_back_schedule + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
-        schedule_resp = requests.get(f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}", headers=headers, timeout=10)
+        schedule_resp = requests.get(f"[https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=](https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=){target_date}", headers=headers, timeout=10)
         if schedule_resp.status_code != 200: continue
         dates = schedule_resp.json().get("dates", [])
         if not dates: continue
@@ -242,7 +240,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                     team_stats[canonical]["schedule_games_7d"] += 1
 
             if d <= days_back_bp:
-                box_resp = requests.get(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore", headers=headers, timeout=10)
+                box_resp = requests.get(f"[https://statsapi.mlb.com/api/v1/game/](https://statsapi.mlb.com/api/v1/game/){game_pk}/boxscore", headers=headers, timeout=10)
                 if box_resp.status_code != 200: continue
                 box_data = box_resp.json()
 
@@ -377,7 +375,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
 
-        scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
+        scores_url = f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=){odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200: return 0
         scores_data = resp.json()
@@ -454,7 +452,7 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
 
 # --- 6. MATCHUP FORMATTING ---
 def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
+    resp = requests.get(f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=){odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
 
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics, memory, today_date_str):
@@ -527,8 +525,202 @@ def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
         raw_text = "".join([p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text])
-    json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw_text.strip(), re.DOTALL)
+        
+    # Safe JSON regex extraction that avoids syntax errors from internal markdown blocks
+    marker = "`" * 3
+    json_match = re.search(rf'{marker}(?:json)?\s*(.*?)\s*{marker}', raw_text.strip(), re.DOTALL)
     if json_match:
         try: return json.loads(json_match.group(1))
         except Exception: pass
-    clean_text = raw_text.replace("```json", "").replace("
+        
+    clean_text = raw_text.replace(f"{marker}json", "").replace(marker, "").strip()
+    try: 
+        return json.loads(clean_text)
+    except Exception:
+        return {}
+
+def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions to ground your projections. Do NOT output any probability above 65% for any market.
+
+    === TODAY'S MATCHUPS, MARKET ODDS & BASELINES ===
+    {json.dumps(formatted_games, indent=2)}
+
+    === ACTIVE PENDING PICKS TO RE-EVALUATE ===
+    {json.dumps(open_picks, indent=2)}
+
+    STRICT RULES & DUAL TAB INSTRUCTIONS:
+    1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
+    2. THE LEASH (±5.0% MAX): Adjust probabilities by a maximum of ± 5.0% based on holistic contextual intuition.
+    3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT force the EV to hit 11%. If the true math makes the EV -5.0%, then output -5.0%.
+    4. DAILY TAB (ALL PICKS): For EVERY game, generate **THREE separate picks** (Moneyline, Run Line/Spread, and Total Over/Under), picking the most favorable side regardless of the final EV.
+    5. MLB TAB (EV >= 11.0% ONLY): Review the natural outputs you just created for the Daily tab. ONLY copy the specific bets that organically achieved an EV of 11.0% or higher into the `mlb_tab_picks` array.
+    6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
+
+    OUTPUT SCHEMA (STRICT JSON):
+    {{
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float>,
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+5.2%",
+          "reason": "<tight summary>"
+        }}
+      ],
+      "daily_tab_picks": [
+        {{
+          "date": "YYYY-MM-DD",
+          "start_time": "YYYY-MM-DD HH:MM PM EDT",
+          "game": "Away Team @ Home Team",
+          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)",
+          "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
+          "odds": -110,
+          "implied_prob": "52.4%",
+          "model_prob": "54.0%",
+          "expected_value": "+3.1%",
+          "high_agreement": "Consensus",
+          "reasoning": "Holistic breakdown of the 6 core metrics",
+          "ai_contextual_shift": "Shifted +X%"
+        }}
+      ],
+      "mlb_tab_picks": [
+        {{
+          "date": "YYYY-MM-DD",
+          "start_time": "YYYY-MM-DD HH:MM PM EDT",
+          "game": "Away Team @ Home Team",
+          "bet_type": "Moneyline (FanDuel)",
+          "pick": "Team Name",
+          "odds": 140,
+          "implied_prob": "41.6%",
+          "model_prob": "55.0%",
+          "expected_value": "+13.2%",
+          "high_agreement": "Consensus",
+          "reasoning": "High-EV justification",
+          "ai_contextual_shift": "Shifted +X%"
+        }}
+      ]
+    }}
+    """
+    for model_name in ["gemini-3.1-pro-preview", "gemini-3.7-flash"]:
+        for attempt in range(2):
+            try:
+                print(f"Attempting synthesis with model: {model_name} (Attempt {attempt+1})...")
+                response = client.models.generate_content(model=model_name, contents=prompt)
+                print(f"Successfully synthesized matchups using {model_name}...")
+                return parse_json_from_response(response)
+            except Exception: time.sleep(5)
+    return {"validations": [], "daily_tab_picks": [], "mlb_tab_picks": []}
+
+# --- 8. MAIN EXECUTION ---
+def main():
+    spreadsheet, daily_sheet, mlb_sheet = get_sheets()
+    ensure_headers(daily_sheet)
+    ensure_headers(mlb_sheet)
+    
+    odds_key = os.environ.get("ODDS_API_KEY")
+    auto_grade_pending_bets(daily_sheet, odds_key)
+    auto_grade_pending_bets(mlb_sheet, odds_key)
+    
+    memory = load_memory()
+    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+    
+    probable_pitchers = fetch_today_probable_pitchers(today_date_str)
+    advanced_metrics = fetch_team_advanced_metrics()
+    fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
+    
+    odds = fetch_mlb_odds(odds_key)
+    if not odds: return
+
+    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory, today_date_str)
+    if not formatted_games:
+        print("No eligible games found for today.")
+        return
+
+    open_picks_detailed = get_today_existing_picks_detailed(daily_sheet, today_date_str)
+    ai_response = generate_daily_and_mlb_picks(formatted_games, open_picks_detailed, memory)
+    
+    # Process Validations
+    validations = ai_response.get("validations", [])
+    if validations:
+        print(f"Processing {len(validations)} pick validation(s)...")
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            reason = str(val.get("reason", "")).strip()
+            for sheet_obj in [daily_sheet, mlb_sheet]:
+                try:
+                    if row_idx and action in ["VALIDATED", "REJECTED"]:
+                        sheet_obj.update_cell(row_idx, 14, action)
+                        if action == "VALIDATED":
+                            if val.get("updated_odds"): sheet_obj.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
+                            if val.get("updated_model_prob"): sheet_obj.update_cell(row_idx, 8, val.get("updated_model_prob"))
+                            if val.get("updated_expected_value"): sheet_obj.update_cell(row_idx, 9, val.get("updated_expected_value"))
+                            if reason: sheet_obj.update_cell(row_idx, 13, reason)
+                            sheet_obj.update_cell(row_idx, 2, current_time_str)
+                        elif action == "REJECTED":
+                            sheet_obj.update_cell(row_idx, 11, "REJECTED")
+                            sheet_obj.update_cell(row_idx, 12, 0.0)
+                            if reason: sheet_obj.update_cell(row_idx, 13, reason)
+                            sheet_obj.update_cell(row_idx, 2, current_time_str)
+                except Exception: pass
+
+    def write_picks_to_sheet(picks_list, target_sheet):
+        appended = 0
+        existing_rows = target_sheet.get_all_values()
+        existing_signatures = [f"{r[2]} | {r[3]}" for r in existing_rows[1:]] if len(existing_rows) > 1 else []
+        
+        for p in picks_list:
+            game = str(p.get("game", "")).strip()
+            bet_type_label = str(p.get("bet_type", "")).strip()
+            
+            book_matched = any(sb.lower() in bet_type_label.lower() for sb in ALLOWED_SPORTSBOOKS)
+            if not book_matched: continue
+
+            sig = f"{game} | {bet_type_label}"
+            if sig in existing_signatures: continue
+
+            pick_date = str(p.get("date", today_date_str)).strip()
+            model_prob_str = str(p.get("model_prob", "50.0%"))
+            try: odds_val = float(p.get("odds", -110))
+            except: odds_val = -110.0
+
+            qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+            
+            cache_data = {}
+            gemini_game_norm = normalize_text(game)
+            for cached_key, data in matchup_cache.items():
+                cached_teams = [normalize_text(t) for t in cached_key.split(" @ ")]
+                if len(cached_teams) == 2 and cached_teams[0] in gemini_game_norm and cached_teams[1] in gemini_game_norm:
+                    cache_data = data
+                    break
+
+            target_sheet.append_row([
+                pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
+                p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
+                qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
+                str(p.get("start_time", "")).strip(),
+                cache_data.get("away_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
+                cache_data.get("home_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
+                cache_data.get("math", "N/A"),              
+                p.get("ai_contextual_shift", "")            
+            ], value_input_option="USER_ENTERED")
+            appended += 1
+            existing_signatures.append(sig)
+        return appended
+
+    daily_picks = ai_response.get("daily_tab_picks", [])
+    daily_count = write_picks_to_sheet(daily_picks, daily_sheet)
+    
+    mlb_picks = ai_response.get("mlb_tab_picks", [])
+    mlb_count = write_picks_to_sheet(mlb_picks, mlb_sheet)
+            
+    print(f"Execution complete! Added {daily_count} natural picks to 'Daily' and {mlb_count} high-EV picks to 'MLB'.")
+
+if __name__ == "__main__":
+    main()
