@@ -461,7 +461,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
-        # Pull securely using canonical lookup keys with robust fallbacks
+        # Pull securely using canonical lookup keys with robust fallback checks
         away_bp_data = objective_fatigue_ratings.get(away, objective_fatigue_ratings.get(raw_away, {"status_string": "Status: FRESH | Math: N/A"}))
         home_bp_data = objective_fatigue_ratings.get(home, objective_fatigue_ratings.get(raw_home, {"status_string": "Status: FRESH | Math: N/A"}))
         
@@ -625,6 +625,7 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
         
+        # Robust normalized lookup to completely prevent N/A values in Columns Q & R
         cache_data = {}
         for cached_key, data in matchup_cache.items():
             if normalize_text(cached_key) == normalize_text(game):
