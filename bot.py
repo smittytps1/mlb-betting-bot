@@ -152,7 +152,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
         evo_sheet.append_row([
             time_str, sport_label, memory.get("total_bets", 0), memory.get("win_rate", "0%"), 
             memory.get("net_profit_dollars", 0.0), weights_str, 
-            memory.get("learnings_and_adjustments", "Maintain balanced multi-factor evaluation."), summary
+            memory.get("learnings_and_adjustments", "Maintain balanced tiered-EV multi-market evaluation."), summary
         ])
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
@@ -472,7 +472,6 @@ def auto_grade_pending_bets(sheet, odds_key):
         pick_idx = headers.index("Pick")
         odds_idx = headers.index("Odds")
         units_idx = headers.index("Units")
-        start_time_idx = headers.index("Game Start Time") if "Game Start Time" in headers else -1
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
@@ -621,7 +620,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 7. AI SYNTHESIS WITH HYBRID REASONING ---
+# --- 7. AI SYNTHESIS WITH TIERED EV & HYBRID REASONING ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -658,11 +657,15 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
     STRICT RULES:
     1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
     2. THE LEASH (±5.0% MAX): Adjust probabilities by a maximum of ± 5.0% based on holistic contextual intuition.
-    3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
-    4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Fully evaluate ALL markets (Moneyline, Run Line/Spreads, and Totals Over/Under). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
-    5. MAX-EV SIDE SELECTION: If multiple markets for the same game (e.g. Moneyline and Run Line) both clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both for the same team.
-    6. SMART VALIDATION FOR IN-PROGRESS GAMES: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if pre-game odds are still available. If a game has already started and the API no longer returns odds for it, DO NOT reject it. Output action "VALIDATED" to keep it as PENDING while it plays out. Only output "REJECTED" if pre-game odds are active and the EV has dropped below 11.0%.
-    7. HYBRID REASONING REQUIREMENT: In the 'reasoning' field of every pick, you MUST blend the exact 6-metric math breakdown (SP WHIP, OPS, ISO, Bullpen Load, Schedule Fatigue, HFA) with a compelling narrative synthesis explaining *why* the market mispriced the line and how past learnings inform the pick.
+    3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake your thresholds.
+    4. TIERED EV THRESHOLDS & NO FORCED PICKS: You do NOT have to generate a pick for every game. Fully evaluate ALL markets (Moneylines, Run Lines/Spreads, and Totals Over/Under). Apply these tiered EV requirements:
+       - Plus-Money Underdogs (+120 or higher): Must meet or exceed **11.0% EV**.
+       - Favorites & Run Lines: Must meet or exceed **7.0% EV**.
+       - Totals (Over/Under): Must meet or exceed **9.0% EV**.
+       Skip any market that fails to clear its respective tier.
+    5. MAX-EV SIDE SELECTION: If multiple markets for the same game clear their EV thresholds, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick multiple bets for the same game.
+    6. SMART VALIDATION FOR IN-PROGRESS GAMES: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if pre-game odds are still available. If a game has already started and the API no longer returns odds for it, DO NOT reject it. Output action "VALIDATED" to keep it as PENDING while it plays out. Only output "REJECTED" if pre-game odds are active and the EV has dropped below the required tier.
+    7. HYBRID REASONING REQUIREMENT: In the 'reasoning' field of every pick, you MUST blend the exact 6-metric math breakdown (SP WHIP, OPS, ISO, Bullpen Load, Schedule Fatigue, HFA) with a compelling narrative synthesis explaining *why* the market mispriced the line, how past learnings inform the pick, and what statistical advantages drove the model probability.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -750,14 +753,11 @@ def main():
             
             try:
                 if row_idx:
-                    # Check if game is still active/on board. If API dropped it because it started, FORCE VALIDATE to keep pending.
-                    # We look up the game title from the sheet row to be sure.
                     row_vals = mlb_sheet.row_values(row_idx)
                     game_title = row_vals[2] if len(row_vals) > 2 else ""
                     
                     is_still_pregame = any(team in game_title for team in active_game_names)
                     if not is_still_pregame and action == "REJECTED":
-                        # Game has started and odds are gone; preserve as PENDING instead of rejecting!
                         action = "VALIDATED"
                         reason = "Game in progress; retaining PENDING status."
 
