@@ -92,9 +92,9 @@ def calculate_runline_prob(lam_fav, lam_dog):
             prob_cover += poisson_probability(lam_fav, f) * poisson_probability(lam_dog, d)
     return max(0.01, min(0.99, prob_cover))
 
-# --- 1. GOOGLE SHEETS SETUP ---
+# --- 1. GOOGLE SHEETS SETUP (STRICTLY MLB TAB) ---
 def get_sheets():
-    print("Connecting to Google Sheets ('Daily' & 'MLB' Tabs)...")
+    print("Connecting to Google Sheets ('MLB' Tab)...")
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
     
@@ -108,14 +108,9 @@ def get_sheets():
     client = gspread.authorize(credentials)
     
     spreadsheet = client.open("MLB AI Betting Tracker")
-    
-    try: daily_sheet = spreadsheet.worksheet("Daily")
-    except Exception: daily_sheet = spreadsheet.add_worksheet(title="Daily", rows=500, cols=25)
-    
-    try: mlb_sheet = spreadsheet.worksheet("MLB")
-    except Exception: mlb_sheet = spreadsheet.add_worksheet(title="MLB", rows=500, cols=25)
+    mlb_sheet = spreadsheet.worksheet("MLB")
         
-    return spreadsheet, daily_sheet, mlb_sheet
+    return spreadsheet, mlb_sheet
 
 def ensure_headers(sheet):
     try:
@@ -546,7 +541,7 @@ def parse_json_from_response(response):
     except Exception:
         return {}
 
-def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
+def generate_mlb_picks(formatted_games, open_picks, memory):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -565,8 +560,7 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
     3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
     4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Evaluate all markets (Moneyline, Run Line, Totals). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
     5. MAX-EV SIDE SELECTION: If both the Moneyline and Run Line for the same team clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both.
-    6. TAB FORMATTING: Output your final list of >= 11.0% EV picks into BOTH the `daily_tab_picks` and `mlb_tab_picks` arrays.
-    7. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
+    6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -578,22 +572,6 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+11.2%",
           "reason": "<tight summary>"
-        }}
-      ],
-      "daily_tab_picks": [
-        {{
-          "date": "YYYY-MM-DD",
-          "start_time": "YYYY-MM-DD HH:MM PM EDT",
-          "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)",
-          "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
-          "odds": 140,
-          "implied_prob": "41.6%",
-          "model_prob": "55.0%",
-          "expected_value": "+13.2%",
-          "high_agreement": "Consensus",
-          "reasoning": "High-EV justification",
-          "ai_contextual_shift": "Shifted +X%"
         }}
       ],
       "mlb_tab_picks": [
@@ -622,16 +600,14 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
                 print(f"Successfully synthesized matchups using {model_name}...")
                 return parse_json_from_response(response)
             except Exception: time.sleep(5)
-    return {"validations": [], "daily_tab_picks": [], "mlb_tab_picks": []}
+    return {"validations": [], "mlb_tab_picks": []}
 
-# --- 8. MAIN EXECUTION ---
+# --- 8. MAIN EXECUTION (STRICTLY MLB TAB) ---
 def main():
-    spreadsheet, daily_sheet, mlb_sheet = get_sheets()
-    ensure_headers(daily_sheet)
+    spreadsheet, mlb_sheet = get_sheets()
     ensure_headers(mlb_sheet)
     
     odds_key = os.environ.get("ODDS_API_KEY")
-    auto_grade_pending_bets(daily_sheet, odds_key)
     auto_grade_pending_bets(mlb_sheet, odds_key)
     
     memory = load_memory()
@@ -650,8 +626,8 @@ def main():
         print("No eligible games found for today.")
         return
 
-    open_picks_detailed = get_today_existing_picks_detailed(daily_sheet, today_date_str)
-    ai_response = generate_daily_and_mlb_picks(formatted_games, open_picks_detailed, memory)
+    open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
+    ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, memory)
     
     # Process Validations with Rate-Limit Throttling (0.5s pause)
     validations = ai_response.get("validations", [])
@@ -661,76 +637,69 @@ def main():
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
-            for sheet_obj in [daily_sheet, mlb_sheet]:
-                try:
-                    if row_idx and action in ["VALIDATED", "REJECTED"]:
-                        sheet_obj.update_cell(row_idx, 14, action)
-                        if action == "VALIDATED":
-                            if val.get("updated_odds"): sheet_obj.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
-                            if val.get("updated_model_prob"): sheet_obj.update_cell(row_idx, 8, val.get("updated_model_prob"))
-                            if val.get("updated_expected_value"): sheet_obj.update_cell(row_idx, 9, val.get("updated_expected_value"))
-                            if reason: sheet_obj.update_cell(row_idx, 13, reason)
-                            sheet_obj.update_cell(row_idx, 2, current_time_str)
-                        elif action == "REJECTED":
-                            sheet_obj.update_cell(row_idx, 11, "REJECTED")
-                            sheet_obj.update_cell(row_idx, 12, 0.0)
-                            if reason: sheet_obj.update_cell(row_idx, 13, reason)
-                            sheet_obj.update_cell(row_idx, 2, current_time_str)
-                        time.sleep(0.5) # Rate-limit protection
-                except Exception: pass
+            try:
+                if row_idx and action in ["VALIDATED", "REJECTED"]:
+                    mlb_sheet.update_cell(row_idx, 14, action)
+                    if action == "VALIDATED":
+                        if val.get("updated_odds"): mlb_sheet.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
+                        if val.get("updated_model_prob"): mlb_sheet.update_cell(row_idx, 8, val.get("updated_model_prob"))
+                        if val.get("updated_expected_value"): mlb_sheet.update_cell(row_idx, 9, val.get("updated_expected_value"))
+                        if reason: mlb_sheet.update_cell(row_idx, 13, reason)
+                        mlb_sheet.update_cell(row_idx, 2, current_time_str)
+                    elif action == "REJECTED":
+                        mlb_sheet.update_cell(row_idx, 11, "REJECTED")
+                        mlb_sheet.update_cell(row_idx, 12, 0.0)
+                        if reason: mlb_sheet.update_cell(row_idx, 13, reason)
+                        mlb_sheet.update_cell(row_idx, 2, current_time_str)
+                    time.sleep(0.5) # Rate-limit protection
+            except Exception: pass
 
-    def write_picks_to_sheet(picks_list, target_sheet):
-        appended = 0
-        existing_rows = target_sheet.get_all_values()
-        existing_signatures = [f"{r[2]} | {r[3]}" for r in existing_rows[1:]] if len(existing_rows) > 1 else []
-        
-        for p in picks_list:
-            game = str(p.get("game", "")).strip()
-            bet_type_label = str(p.get("bet_type", "")).strip()
-            
-            book_matched = any(sb.lower() in bet_type_label.lower() for sb in ALLOWED_SPORTSBOOKS)
-            if not book_matched: continue
-
-            sig = f"{game} | {bet_type_label}"
-            if sig in existing_signatures: continue
-
-            pick_date = str(p.get("date", today_date_str)).strip()
-            model_prob_str = str(p.get("model_prob", "50.0%"))
-            try: odds_val = float(p.get("odds", -110))
-            except: odds_val = -110.0
-
-            qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
-            
-            cache_data = {}
-            gemini_game_norm = normalize_text(game)
-            for cached_key, data in matchup_cache.items():
-                cached_teams = [normalize_text(t) for t in cached_key.split(" @ ")]
-                if len(cached_teams) == 2 and cached_teams[0] in gemini_game_norm and cached_teams[1] in gemini_game_norm:
-                    cache_data = data
-                    break
-
-            target_sheet.append_row([
-                pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
-                p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
-                qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
-                str(p.get("start_time", "")).strip(),
-                cache_data.get("away_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
-                cache_data.get("home_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
-                cache_data.get("math", "N/A"),              
-                p.get("ai_contextual_shift", "")            
-            ], value_input_option="USER_ENTERED")
-            appended += 1
-            existing_signatures.append(sig)
-            time.sleep(0.5) # Rate-limit protection
-        return appended
-
-    daily_picks = ai_response.get("daily_tab_picks", [])
-    daily_count = write_picks_to_sheet(daily_picks, daily_sheet)
-    
+    # Write new picks exclusively to MLB tab with rate-limit protection
     mlb_picks = ai_response.get("mlb_tab_picks", [])
-    mlb_count = write_picks_to_sheet(mlb_picks, mlb_sheet)
+    appended = 0
+    existing_rows = mlb_sheet.get_all_values()
+    existing_signatures = [f"{r[2]} | {r[3]}" for r in existing_rows[1:]] if len(existing_rows) > 1 else []
+    
+    for p in mlb_picks:
+        game = str(p.get("game", "")).strip()
+        bet_type_label = str(p.get("bet_type", "")).strip()
+        
+        book_matched = any(sb.lower() in bet_type_label.lower() for sb in ALLOWED_SPORTSBOOKS)
+        if not book_matched: continue
+
+        sig = f"{game} | {bet_type_label}"
+        if sig in existing_signatures: continue
+
+        pick_date = str(p.get("date", today_date_str)).strip()
+        model_prob_str = str(p.get("model_prob", "50.0%"))
+        try: odds_val = float(p.get("odds", -110))
+        except: odds_val = -110.0
+
+        qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+        
+        cache_data = {}
+        gemini_game_norm = normalize_text(game)
+        for cached_key, data in matchup_cache.items():
+            cached_teams = [normalize_text(t) for t in cached_key.split(" @ ")]
+            if len(cached_teams) == 2 and cached_teams[0] in gemini_game_norm and cached_teams[1] in gemini_game_norm:
+                cache_data = data
+                break
+
+        mlb_sheet.append_row([
+            pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
+            p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
+            qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
+            str(p.get("start_time", "")).strip(),
+            cache_data.get("away_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
+            cache_data.get("home_bp", "Status: FRESH | Load Index: 0.0 | Relief Apps: 0 | Total Pitches (2 Days): 0 | Games Played (Last 7 Days): 0"),           
+            cache_data.get("math", "N/A"),              
+            p.get("ai_contextual_shift", "")            
+        ], value_input_option="USER_ENTERED")
+        appended += 1
+        existing_signatures.append(sig)
+        time.sleep(0.5) # Rate-limit protection
             
-    print(f"Execution complete! Added {daily_count} natural picks to 'Daily' and {mlb_count} high-EV picks to 'MLB'.")
+    print(f"Execution complete! Added {appended} high-EV picks to the 'MLB' tab.")
 
 if __name__ == "__main__":
     main()
