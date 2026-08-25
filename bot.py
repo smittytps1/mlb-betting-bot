@@ -92,7 +92,7 @@ def calculate_runline_prob(lam_fav, lam_dog):
             prob_cover += poisson_probability(lam_fav, f) * poisson_probability(lam_dog, d)
     return max(0.01, min(0.99, prob_cover))
 
-# --- 1. GOOGLE SHEETS SETUP (AUTHENTICATION PATCHED) ---
+# --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
     print("Connecting to Google Sheets ('Daily' & 'MLB' Tabs)...")
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
@@ -103,7 +103,6 @@ def get_sheets():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # Direct credential instantiation guarantees the scopes are passed to Google
     creds_dict = json.loads(service_account_str)
     credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(credentials)
@@ -536,7 +535,6 @@ def parse_json_from_response(response):
     if hasattr(response, "candidates") and response.candidates:
         raw_text = "".join([p.text for p in response.candidates[0].content.parts if hasattr(p, "text") and p.text])
         
-    # Safe JSON regex extraction that avoids syntax errors from internal markdown blocks
     marker = "`" * 3
     json_match = re.search(rf'{marker}(?:json)?\s*(.*?)\s*{marker}', raw_text.strip(), re.DOTALL)
     if json_match:
@@ -562,13 +560,14 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
     === ACTIVE PENDING PICKS TO RE-EVALUATE ===
     {json.dumps(open_picks, indent=2)}
 
-    STRICT RULES & DUAL TAB INSTRUCTIONS:
+    STRICT RULES:
     1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
     2. THE LEASH (±5.0% MAX): Adjust probabilities by a maximum of ± 5.0% based on holistic contextual intuition.
-    3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT force the EV to hit 11%. If the true math makes the EV -5.0%, then output -5.0%.
-    4. DAILY TAB (ALL PICKS): For EVERY game, generate **THREE separate picks** (Moneyline, Run Line/Spread, and Total Over/Under), picking the most favorable side regardless of the final EV.
-    5. MLB TAB (EV >= 11.0% ONLY): Review the natural outputs you just created for the Daily tab. ONLY copy the specific bets that organically achieved an EV of 11.0% or higher into the `mlb_tab_picks` array.
-    6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
+    3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
+    4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Evaluate all markets (Moneyline, Run Line, Totals). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
+    5. MAX-EV SIDE SELECTION: If both the Moneyline and Run Line for the same team clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both.
+    6. TAB FORMATTING: Output your final list of >= 11.0% EV picks into BOTH the `daily_tab_picks` and `mlb_tab_picks` arrays.
+    7. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -578,7 +577,7 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
           "action": "VALIDATED" or "REJECTED",
           "updated_odds": <int or float>,
           "updated_model_prob": "58.0%",
-          "updated_expected_value": "+5.2%",
+          "updated_expected_value": "+11.2%",
           "reason": "<tight summary>"
         }}
       ],
@@ -589,12 +588,12 @@ def generate_daily_and_mlb_picks(formatted_games, open_picks, memory):
           "game": "Away Team @ Home Team",
           "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)",
           "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
-          "odds": -110,
-          "implied_prob": "52.4%",
-          "model_prob": "54.0%",
-          "expected_value": "+3.1%",
+          "odds": 140,
+          "implied_prob": "41.6%",
+          "model_prob": "55.0%",
+          "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "Holistic breakdown of the 6 core metrics",
+          "reasoning": "High-EV justification",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ],
