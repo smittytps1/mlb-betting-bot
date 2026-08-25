@@ -250,8 +250,9 @@ def fetch_recent_bullpen_usage(days_back=2):
                 canonical = match_canonical_team(team_box.get("team", {}).get("name", ""))
                 if not canonical: continue
 
+                # FIX: Initialize sets to track the actual dates pitchers threw
                 if canonical not in team_stats:
-                    team_stats[canonical] = {"raw_pitches": 0, "weighted_load": 0.0, "closer_b2b": False, "setup_b2b": False}
+                    team_stats[canonical] = {"raw_pitches": 0, "weighted_load": 0.0, "closer_dates": set(), "setup_dates": set()}
 
                 hierarchy = hl_hierarchy.get(canonical, {"closer": "", "setup": []})
                 closer_name = hierarchy.get("closer")
@@ -269,10 +270,10 @@ def fetch_recent_bullpen_usage(days_back=2):
 
                         if p_name == closer_name:
                             weight = 3.0
-                            team_stats[canonical]["closer_b2b"] = True
+                            team_stats[canonical]["closer_dates"].add(target_date)
                         elif p_name in setup_names:
                             weight = 2.0
-                            team_stats[canonical]["setup_b2b"] = True
+                            team_stats[canonical]["setup_dates"].add(target_date)
                         else:
                             weight = 1.0
 
@@ -282,8 +283,9 @@ def fetch_recent_bullpen_usage(days_back=2):
     objective_ratings = {}
     for team, stats in team_stats.items():
         load = stats["weighted_load"]
-        c_b2b = stats["closer_b2b"]
-        s_b2b = stats["setup_b2b"]
+        # FIX: Only flag as B2B True if they pitched on 2 distinct days
+        c_b2b = len(stats["closer_dates"]) >= 2
+        s_b2b = len(stats["setup_dates"]) >= 2
 
         if c_b2b or load >= 100: status = f"TAXED / FATIGUED (Closer B2B Burn: {c_b2b})"
         elif s_b2b or load >= 60: status = "MODERATELY WORKED (Setup Men Used)"
