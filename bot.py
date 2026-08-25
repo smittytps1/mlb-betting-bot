@@ -230,7 +230,8 @@ def fetch_recent_bullpen_usage(days_back=2):
 
             for side in ["away", "home"]:
                 team_box = box_data.get("teams", {})[side]
-                canonical = match_canonical_team(team_box.get("team", {}).get("name", ""))
+                raw_team_name = team_box.get("team", {}).get("name", "")
+                canonical = match_canonical_team(raw_team_name)
                 if not canonical: continue
 
                 if canonical not in team_stats:
