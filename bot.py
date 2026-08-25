@@ -370,7 +370,7 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0
 
         keywords_map = {
-            "starting_pitcher_expected_metrics": ["whipp", "sp", "era", "fip", "strikeout"],
+            "starting_pitcher_expected_metrics": ["whip", "sp", "era", "fip", "strikeout"],
             "platoon_and_lineup_splits": ["ops", "iso", "lineup", "platoon"],
             "bullpen_depth_and_fatigue": ["bullpen", "load", "taxed", "relief", "closer"]
         }
@@ -460,7 +460,7 @@ def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigu
     
     return home_prob, away_prob, projected_total, " | ".join(math_log)
 
-# --- 5. AUTO-GRADING ---
+# --- 5. AUTO-GRADING & SMART VALIDATION ---
 def auto_grade_pending_bets(sheet, odds_key):
     try:
         rows = sheet.get_all_values()
@@ -472,6 +472,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         pick_idx = headers.index("Pick")
         odds_idx = headers.index("Odds")
         units_idx = headers.index("Units")
+        start_time_idx = headers.index("Game Start Time") if "Game Start Time" in headers else -1
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
@@ -620,7 +621,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 7. AI SYNTHESIS WITH EVOLUTION TAB FEEDBACK LOOP ---
+# --- 7. AI SYNTHESIS WITH HYBRID REASONING ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -660,8 +661,8 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
     3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
     4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Fully evaluate ALL markets (Moneyline, Run Line/Spreads, and Totals Over/Under). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
     5. MAX-EV SIDE SELECTION: If multiple markets for the same game (e.g. Moneyline and Run Line) both clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both for the same team.
-    6. MANDATORY 6-METRIC REASONING BREAKDOWN: In the 'reasoning' field of every pick, you MUST explicitly itemize the math based on the Python baseline log, breaking down: (1) Starting Pitcher WHIP, (2) Team OPS, (3) ISO Contact Quality, (4) Bullpen Load/Fatigue, (5) Situational Schedule Fatigue, and (6) HFA. This is critical for future memory learning.
-    7. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
+    6. SMART VALIDATION FOR IN-PROGRESS GAMES: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if pre-game odds are still available. If a game has already started and the API no longer returns odds for it, DO NOT reject it. Output action "VALIDATED" to keep it as PENDING while it plays out. Only output "REJECTED" if pre-game odds are active and the EV has dropped below 11.0%.
+    7. HYBRID REASONING REQUIREMENT: In the 'reasoning' field of every pick, you MUST blend the exact 6-metric math breakdown (SP WHIP, OPS, ISO, Bullpen Load, Schedule Fatigue, HFA) with a compelling narrative synthesis explaining *why* the market mispriced the line and how past learnings inform the pick.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -687,7 +688,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "6-metric itemized breakdown: SP WHIP ([val]), OPS ([val]), ISO ([val]), Bullpen Load ([val]), Schedule Fatigue ([val]), HFA (+1.5%), leading to model probability X%.",
+          "reasoning": "Hybrid narrative and math breakdown: 6-metric baseline (SP WHIP [val], OPS [val], ISO [val], Bullpen [val], Schedule [val], HFA +1.5%) combined with narrative synthesis on market inefficiency.",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
@@ -736,16 +737,30 @@ def main():
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
     
-    # Process Validations with Rate-Limit Throttling (0.5s pause)
+    # Process Validations with In-Progress Game Protection & Rate-Limit Throttling
     validations = ai_response.get("validations", [])
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
+        active_game_names = [match_canonical_team(g.get("home_team", "")) for g in odds] + [match_canonical_team(g.get("away_team", "")) for g in odds]
+        
         for val in validations:
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
+            
             try:
-                if row_idx and action in ["VALIDATED", "REJECTED"]:
+                if row_idx:
+                    # Check if game is still active/on board. If API dropped it because it started, FORCE VALIDATE to keep pending.
+                    # We look up the game title from the sheet row to be sure.
+                    row_vals = mlb_sheet.row_values(row_idx)
+                    game_title = row_vals[2] if len(row_vals) > 2 else ""
+                    
+                    is_still_pregame = any(team in game_title for team in active_game_names)
+                    if not is_still_pregame and action == "REJECTED":
+                        # Game has started and odds are gone; preserve as PENDING instead of rejecting!
+                        action = "VALIDATED"
+                        reason = "Game in progress; retaining PENDING status."
+
                     mlb_sheet.update_cell(row_idx, 14, action)
                     if action == "VALIDATED":
                         if val.get("updated_odds"): mlb_sheet.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
