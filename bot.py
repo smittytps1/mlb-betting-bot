@@ -97,13 +97,6 @@ def ensure_headers(sheet):
         ]
         if not existing or not existing[0] or existing[0][0] != "Date": 
             sheet.insert_row(headers, index=1)
-        else:
-            current_headers = existing[0]
-            if "Game Start Time" not in current_headers: sheet.update_cell(1, 16, "Game Start Time")
-            if "Away Bullpen Math" not in current_headers: sheet.update_cell(1, 17, "Away Bullpen Math")
-            if "Home Bullpen Math" not in current_headers: sheet.update_cell(1, 18, "Home Bullpen Math")
-            if "Python Math Baseline" not in current_headers: sheet.update_cell(1, 19, "Python Math Baseline")
-            if "AI Contextual Shift" not in current_headers: sheet.update_cell(1, 20, "AI Contextual Shift")
     except Exception as e: 
         print(f"Header notice: {e}")
 
@@ -115,20 +108,6 @@ def ensure_evolution_sheet(spreadsheet):
             evo_sheet.insert_row(["Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"], index=1)
         return evo_sheet
     except Exception: return None
-
-def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
-    try:
-        evo_sheet = ensure_evolution_sheet(spreadsheet)
-        if not evo_sheet: return
-        factors = memory.get("reasoning_factor_weights", {})
-        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()]) if factors else "Standard (1.0x)"
-        evo_sheet.append_row([
-            time_str, sport_label, memory.get("total_bets", 0), memory.get("win_rate", "0%"), 
-            memory.get("net_profit_dollars", 0.0), weights_str, 
-            memory.get("learnings_and_adjustments", "Maintain balanced quantitative multi-factor evaluation."), summary
-        ])
-    except Exception as e:
-        print(f"Notice while logging to Evolution tab: {e}")
 
 # --- 2. ADVANCED METRICS & PROBABLES ---
 def fetch_team_advanced_metrics():
@@ -153,19 +132,16 @@ def fetch_team_advanced_metrics():
                         splits = stat_group.get("splits", [])
                         if not splits: continue
                         stat_data = splits[0].get("stat", {})
-                        
                         if group_name == "hitting":
                             metrics_map[canonical]["ops"] = float(stat_data.get("ops", ".720"))
                         elif group_name == "pitching":
                             metrics_map[canonical]["whip"] = float(stat_data.get("whip", "1.30"))
-    except Exception as e:
-        pass
+    except Exception: pass
     return metrics_map
 
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
-    
     try:
         espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
         if espn_resp.status_code == 200:
@@ -181,64 +157,47 @@ def fetch_today_probable_pitchers(target_date_str):
                             team_name = match_canonical_team(c.get("team", {}).get("displayName", ""))
                             if team_name: pitcher_map[team_name] = p_name
     except Exception: pass
-
-    try:
-        mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
-        mlb_resp = requests.get(mlb_url, headers=headers, timeout=10)
-        if mlb_resp.status_code == 200:
-            dates = mlb_resp.json().get("dates", [])
-            if dates:
-                for game in dates[0].get("games", []):
-                    teams = game.get("teams", {})
-                    for side in ["away", "home"]:
-                        team_data = teams.get(side, {})
-                        canonical = match_canonical_team(team_data.get("team", {}).get("name", ""))
-                        if canonical and (canonical not in pitcher_map or "TBD" in pitcher_map[canonical]):
-                            pitcher_info = team_data.get("probablePitcher", {})
-                            if pitcher_info:
-                                p_name = pitcher_info.get("fullName", "TBD")
-                                pitcher_map[canonical] = p_name
-    except Exception: pass
-
     return pitcher_map
 
-# --- 3. BULLPEN & PYTHON MATH ENGINE ---
+# --- 3. BULLPEN & ACTIVE SELF-LEARNING PYTHON MATH ENGINE ---
+def load_memory():
+    if os.path.exists("bot_memory.json"):
+        try:
+            with open("bot_memory.json", "r") as f: return json.load(f)
+        except Exception: pass
+    return {
+        "total_bets": 0, "wins": 0, "losses": 0,
+        "reasoning_factor_weights": {
+            "bullpen_depth_and_fatigue": {"weight": 1.0},
+            "platoon_and_lineup_splits": {"weight": 1.0},
+            "starting_pitcher_expected_metrics": {"weight": 1.0}
+        }
+    }
+
 def fetch_team_high_leverage_hierarchies():
     high_leverage_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
         if teams_resp.status_code != 200: return {}
-        
         for t in teams_resp.json().get("teams", []):
             team_id = t.get("id")
             canonical_name = match_canonical_team(t.get("name", ""))
             if not canonical_name: continue
-
             stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
             stats_resp = requests.get(stats_url, headers=headers, timeout=5)
             if stats_resp.status_code != 200: continue
-
-            closers, setup_men = [], []
+            closers = []
             for roster_item in stats_resp.json().get("roster", []):
                 person = roster_item.get("person", {})
                 p_name = person.get("fullName", "")
                 for s in person.get("stats", []):
                     if s.get("type", {}).get("displayName") == "season":
-                        split = s.get("splits", [])
-                        if split:
-                            stat_data = split[0].get("stat", {})
-                            saves = int(stat_data.get("saves", 0))
-                            holds = int(stat_data.get("holds", 0))
+                        for split in s.get("splits", []):
+                            saves = int(split.get("stat", {}).get("saves", 0))
                             if saves >= 2: closers.append((p_name, saves))
-                            if holds >= 2: setup_men.append((p_name, holds))
-
             closers.sort(key=lambda x: x[1], reverse=True)
-            setup_men.sort(key=lambda x: x[1], reverse=True)
-            high_leverage_map[canonical_name] = {
-                "closer": closers[0][0] if closers else "Unknown Closer",
-                "setup": [s[0] for s in setup_men[:2]]
-            }
+            high_leverage_map[canonical_name] = {"closer": closers[0][0] if closers else "Unknown Closer"}
     except Exception: pass
     return high_leverage_map
 
@@ -268,11 +227,10 @@ def fetch_recent_bullpen_usage(days_back=2):
                 if not canonical: continue
 
                 if canonical not in team_stats:
-                    team_stats[canonical] = {"closer_dates": set(), "setup_dates": set(), "closer_pitches": 0, "setup_pitches": 0, "middle_pitches": 0}
+                    team_stats[canonical] = {"closer_dates": set(), "closer_pitches": 0, "setup_pitches": 0, "middle_pitches": 0}
 
-                hierarchy = hl_hierarchy.get(canonical, {"closer": "", "setup": []})
+                hierarchy = hl_hierarchy.get(canonical, {"closer": ""})
                 closer_name = hierarchy.get("closer")
-                setup_names = hierarchy.get("setup", [])
                 pitchers = team_box.get("pitchers", [])
                 players = team_box.get("players", {})
 
@@ -286,67 +244,62 @@ def fetch_recent_bullpen_usage(days_back=2):
                         if p_name == closer_name:
                             team_stats[canonical]["closer_dates"].add(target_date)
                             team_stats[canonical]["closer_pitches"] += pitches
-                        elif p_name in setup_names:
-                            team_stats[canonical]["setup_dates"].add(target_date)
-                            team_stats[canonical]["setup_pitches"] += pitches
                         else:
                             team_stats[canonical]["middle_pitches"] += pitches
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        cp, sp, mp = stats["closer_pitches"], stats["setup_pitches"], stats["middle_pitches"]
-        load = (cp * 3.0) + (sp * 2.0) + (mp * 1.0)
+        cp, mp = stats["closer_pitches"], stats["middle_pitches"]
+        load = (cp * 3.0) + (mp * 1.0)
         c_b2b = len(stats["closer_dates"]) >= 2
-        s_b2b = len(stats["setup_dates"]) >= 2
-
-        if c_b2b or load >= 100: status = f"TAXED (Closer B2B: {c_b2b})"
-        elif s_b2b or load >= 60: status = "MODERATELY WORKED"
-        else: status = "FRESH"
-
-        breakdown = f"(Closer: {cp}x3) + (Setup: {sp}x2) + (Middle: {mp}x1)"
+        status = f"TAXED (Closer B2B: {c_b2b})" if (c_b2b or load >= 100) else "FRESH"
         objective_ratings[team] = {
-            "status_string": f"Status: {status} | Load: {round(load, 1)} | Math: {breakdown}",
+            "status_string": f"Status: {status} | Load: {round(load, 1)}",
             "load": load,
             "closer_b2b": c_b2b
         }
     return objective_ratings
 
-def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics):
+def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory):
     home_prob = 0.50 
     math_log = []
+    weights = memory.get("reasoning_factor_weights", {})
+    
+    # Apply self-learning weights from bot_memory.json
+    bp_weight = weights.get("bullpen_depth_and_fatigue", {}).get("weight", 1.0)
+    ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
+    whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
     
     a_load = fatigue_data.get(away, {}).get("load", 0)
     h_load = fatigue_data.get(home, {}).get("load", 0)
-    bp_shift = ((a_load - h_load) / 100.0) * 0.015
+    bp_shift = (((a_load - h_load) / 100.0) * 0.015) * bp_weight
     home_prob += bp_shift
-    math_log.append(f"Bullpen Load: {round(bp_shift*100, 2)}%")
+    math_log.append(f"Bullpen Load (wt {bp_weight}x): {round(bp_shift*100, 2)}%")
     
     b2b_shift = 0.0
-    if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += 0.02
-    if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= 0.02
+    if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += (0.02 * bp_weight)
+    if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= (0.02 * bp_weight)
     home_prob += b2b_shift
-    if b2b_shift != 0: math_log.append(f"B2B Closer Penalty: {round(b2b_shift*100, 2)}%")
     
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
-    ops_shift = ((h_ops - a_ops) / 0.050) * 0.02
+    ops_shift = (((h_ops - a_ops) / 0.050) * 0.02) * ops_weight
     home_prob += ops_shift
-    math_log.append(f"OPS Shift: {round(ops_shift*100, 2)}%")
+    math_log.append(f"OPS Shift (wt {ops_weight}x): {round(ops_shift*100, 2)}%")
     
     a_whip = advanced_metrics.get(away, {}).get("whip", 1.30)
     h_whip = advanced_metrics.get(home, {}).get("whip", 1.30)
-    whip_shift = ((a_whip - h_whip) / 0.10) * 0.015
+    whip_shift = (((a_whip - h_whip) / 0.10) * 0.015) * whip_weight
     home_prob += whip_shift
-    math_log.append(f"WHIP Shift: {round(whip_shift*100, 2)}%")
+    math_log.append(f"WHIP Shift (wt {whip_weight}x): {round(whip_shift*100, 2)}%")
     
     home_prob += 0.015
     math_log.append("HFA: +1.50%")
     
     home_prob = max(0.05, min(0.95, home_prob))
-    away_prob = 1.0 - home_prob
-    return home_prob, away_prob, " | ".join(math_log)
+    return home_prob, 1.0 - home_prob, " | ".join(math_log)
 
-# --- 4. AUTO-GRADING ---
+# --- 4. AUTO-GRADING & ROBUST ANTI-DUPLICATION ---
 def auto_grade_pending_bets(sheet, odds_key):
     try:
         rows = sheet.get_all_values()
@@ -358,7 +311,6 @@ def auto_grade_pending_bets(sheet, odds_key):
         pick_idx = headers.index("Pick")
         odds_idx = headers.index("Odds")
         units_idx = headers.index("Units")
-        start_time_idx = headers.index("Game Start Time") if "Game Start Time" in headers else -1
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
@@ -372,9 +324,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         for row_idx, r in pending_rows:
             pick_date_str = str(r[0]).strip()
             game_title = str(r[game_idx]).strip()
-            bet_type = str(r[bet_type_idx]).strip().lower()
             pick_str = str(r[pick_idx]).strip()
-            
             try: odds = float(r[odds_idx])
             except: odds = -110.0
             try: units = float(r[units_idx]) if r[units_idx] else 1.0
@@ -391,7 +341,6 @@ def auto_grade_pending_bets(sheet, odds_key):
                     except Exception: pass
                 
                 if pick_date_str != match_date_ny_str: continue
-
                 home_team = match.get("home_team", "")
                 away_team = match.get("away_team", "")
                 if match_canonical_team(home_team) in game_title or match_canonical_team(away_team) in game_title:
@@ -401,16 +350,12 @@ def auto_grade_pending_bets(sheet, odds_key):
                     away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
                     
                     winner = home_team if home_score > away_score else away_team
-                    is_win = match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower()
-                    status = "WIN" if is_win else "LOSS"
+                    status = "WIN" if match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() else "LOSS"
                     profit = ((odds / 100.0) * 100.0 * units) if (status == "WIN" and odds > 0) else ((100.0 / abs(odds)) * 100.0 * units) if status == "WIN" else (-100.0 * units)
                     updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
                     break
-        if updates:
-            sheet.batch_update(updates)
-            return len(updates)
+        if updates: sheet.batch_update(updates)
     except Exception: pass
-    return 0
 
 def update_scoreboard(spreadsheet):
     try:
@@ -418,35 +363,27 @@ def update_scoreboard(spreadsheet):
         except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
         scoreboard_data = [
             ["Bot / Sport & Timeframe", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
-            ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)'],
-            ["MLB Bot (7-Day / 1-Week)", '=SUMPRODUCT((MLB!K2:K="WIN")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', '=SUMPRODUCT((MLB!K2:K="LOSS")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', '=SUMPRODUCT((MLB!K2:K="PENDING")*(IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>""))', '=IFERROR(B3/(B3+C3), 0)', '=SUMPRODUCT((IFERROR(DATEVALUE(MLB!A2:A),IFERROR(VALUE(MLB!A2:A),0))>=TODAY()-7)*(MLB!A2:A<>"")*(IFERROR(VALUE(MLB!L2:L),0)))']
+            ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)']
         ]
         sb.clear()
-        sb.update(range_name="A1:F3", values=scoreboard_data, value_input_option="USER_ENTERED")
+        sb.update(range_name="A1:F2", values=scoreboard_data, value_input_option="USER_ENTERED")
     except Exception: pass
-
-# --- 6. MEMORY ---
-def load_memory():
-    if os.path.exists("bot_memory.json"):
-        try:
-            with open("bot_memory.json", "r") as f: return json.load(f)
-        except Exception: pass
-    return {"total_bets": 0, "wins": 0, "losses": 0, "reasoning_factor_weights": {}}
-
-def update_memory_from_sheet(sheet, memory):
-    return memory # Lightweight placeholder
-
-# --- 7. MATCHUP FORMATTING & STRICT GUARDRAIL ---
-def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
-    return resp.json() if resp.status_code == 200 else []
 
 def get_today_existing_picks(sheet, today_date_str):
     rows = sheet.get_all_values()
     if len(rows) <= 1: return []
-    return [{"row_index": i, "date": r[0], "game": r[2], "status": r[10]} for i, r in enumerate(rows[1:], start=2) if r[0] == today_date_str and r[10] == "PENDING"]
+    existing = []
+    for r in rows[1:]:
+        if len(r) > 10 and str(r[0]).strip() == today_date_str and str(r[10]).strip().upper() == "PENDING":
+            existing.append(str(r[2]).strip()) # Game title
+    return existing
 
-def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics):
+# --- 5. MATCHUP FORMATTING & ANTI-DUPLICATION CHECK ---
+def fetch_mlb_odds(odds_key):
+    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
+    return resp.json() if resp.status_code == 200 else []
+
+def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics, memory):
     valid = []
     matchup_cache = {}  
     current_utc = datetime.now(ZoneInfo("UTC"))
@@ -458,26 +395,20 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         if commence_time_str:
             try:
                 dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
-                if dt_utc < current_utc:
-                    print(f"  [Time Filter] Dropping {away} @ {home} (Game Already Started)")
-                    continue
+                if dt_utc < current_utc: continue
                 game_time_et = dt_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception: pass
 
         h_pitcher = probable_pitchers.get(home, "TBD")
         a_pitcher = probable_pitchers.get(away, "TBD")
         
-        home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics)
+        home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
-        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
-        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
+        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH')
+        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH')
         
         game_key = f"{away} @ {home}"
-        matchup_cache[game_key] = {
-            "away_bp": away_bp_str,
-            "home_bp": home_bp_str,
-            "math": math_log
-        }
+        matchup_cache[game_key] = {"away_bp": away_bp_str, "home_bp": home_bp_str, "math": math_log}
 
         game_copy = dict(game)
         game_copy["matchup_context"] = {
@@ -490,11 +421,10 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
             "home_win_prob_baseline": f"{round(home_prob * 100, 1)}%",
             "calculation_log": math_log
         }
-        
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 8. AI BOUNDED ADJUSTER ---
+# --- 6. AI SYNTHESIS WITH MEMORY FEEDBACK ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -505,35 +435,23 @@ def parse_json_from_response(response):
         except Exception: pass
     return json.loads(raw_text.replace("```json", "").replace("```", "").strip())
 
-def generate_picks_and_validations(formatted_games, memory, open_picks):
+def generate_picks_and_validations(formatted_games, memory):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an elite Bounded Contextual Adjuster. Python has already calculated the strict mathematical baseline win probability for these MLB matchups. 
+    You are an elite Bounded Contextual Adjuster. Python has calculated strict baselines using active factor memory weights: {json.dumps(memory.get('reasoning_factor_weights', {}))}
 
-    === TODAY'S MATCHUPS & PYTHON MATH BASELINE ===
+    === TODAY'S MATCHUPS & BASELINES ===
     {json.dumps(formatted_games, indent=2)}
 
-    STRICT RULES & DIRECTIVES:
-    1. THE TIGHT LEASH (±5.0% MAX): You may only adjust Python's 'home_win_prob_baseline' or 'away_win_prob_baseline' by a maximum of ± 5.0%. 
-    2. ANTI-HYPE & OBJECTIVITY: Disregard media hype, prospect excitement, or narrative-driven biases. Base your synthesis entirely on hard data: actual pitching performance metrics (like xFIP, ERA, WHIP), verified injury statuses, true lineup splits, and concrete environmental or fatigue factors.
-    3. NO FORCING / NO ARTIFICIAL SHIFTING: Do not adjust a probability simply to force a game past the 11.0% Expected Value threshold. If the true synthesized context does not warrant a shift, leave the baseline as close to Python's math as possible. Only shift when concrete data substantiates it.
-    4. THE 11 PERCENT EV THRESHOLD: Recommend picks where your final rigorously synthesized `model_prob` provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds.
-    5. NO FABRICATION: Do not invent any numbers or rewrite Python's math logs.
+    STRICT RULES:
+    1. THE TIGHT LEASH (±5.0% MAX): Adjust baselines by a maximum of ± 5.0%.
+    2. ANTI-HYPE & OBJECTIVITY: Disregard media hype. Base synthesis on hard data.
+    3. THE 11 PERCENT EV THRESHOLD: Recommend picks where final `model_prob` gives an EV of 11.0% or higher.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
-      "validations": [
-        {{
-          "row_index": <int matching row_index in open_picks>,
-          "action": "VALIDATED" or "REJECTED",
-          "updated_odds": <int or float>,
-          "updated_model_prob": "58.0%",
-          "updated_expected_value": "+11.7%",
-          "reason": "<tight summary>"
-        }}
-      ],
       "new_picks": [
         {{
           "date": "YYYY-MM-DD",
@@ -545,9 +463,9 @@ def generate_picks_and_validations(formatted_games, memory, open_picks):
           "implied_prob": "52.4%",
           "model_prob": "55.0%",
           "expected_value": "+11.7%",
-          "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<Objective, data-driven explanation of underlying stats or metrics driving the shift>",
-          "ai_contextual_shift": "Shifted +X% because <strict factual reason>"
+          "high_agreement": "Consensus",
+          "reasoning": "Data-driven explanation",
+          "ai_contextual_shift": "Shifted +X% because strict factual reason"
         }}
       ]
     }}
@@ -558,9 +476,9 @@ def generate_picks_and_validations(formatted_games, memory, open_picks):
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 return parse_json_from_response(response)
             except Exception: time.sleep(5)
-    return {"validations": [], "new_picks": []}
+    return {"new_picks": []}
 
-# --- 9. MAIN EXECUTION ---
+# --- 7. MAIN EXECUTION ---
 def main():
     spreadsheet, sheet = get_sheets()
     ensure_headers(sheet)
@@ -573,54 +491,29 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
     
-    print("Fetching starting pitchers...")
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
-    
-    print("Fetching advanced statistical metrics...")
     advanced_metrics = fetch_team_advanced_metrics()
-    
-    print("Calculating rolling bullpen fatigue...")
     fatigue_data = fetch_recent_bullpen_usage(days_back=2)
-    
-    print("Fetching live sportsbook odds...")
     odds = fetch_mlb_odds(odds_key)
-    if not odds: 
-        print("Error: No odds returned from API.")
-        return
+    if not odds: return
 
-    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics)
+    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory)
+    if not formatted_games: return
+
+    # Pull existing pending games to completely prevent duplicates
+    existing_games = get_today_existing_picks(sheet, today_date_str)
     
-    if not formatted_games:
-        print("WARNING: 0 games passed the pre-game filters.")
-        return
-
-    print(f"Sending {len(formatted_games)} mathematically scored matchups to the AI for Contextual Adjustment...")
-    open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(formatted_games, memory, open_picks)
-    
-    validations = ai_response.get("validations", [])
-    if validations:
-        for val in validations:
-            row_idx = val.get("row_index")
-            action = str(val.get("action", "")).strip().upper()
-            if row_idx and action in ["VALIDATED", "REJECTED"]:
-                sheet.update_cell(row_idx, 14, action)
-                if action == "VALIDATED":
-                    if val.get("updated_odds"): sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
-                    if val.get("updated_model_prob"): sheet.update_cell(row_idx, 8, val["updated_model_prob"])
-                    if val.get("updated_expected_value"): sheet.update_cell(row_idx, 9, val["updated_expected_value"])
-                    sheet.update_cell(row_idx, 2, current_time_str)
-                elif action == "REJECTED":
-                    sheet.update_cell(row_idx, 11, "REJECTED")
-                    sheet.update_cell(row_idx, 12, 0.0)
-                    sheet.update_cell(row_idx, 2, current_time_str)
-
+    ai_response = generate_picks_and_validations(formatted_games, memory)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
     
     for p in new_picks:
-        pick_date = str(p.get("date", today_date_str)).strip()
         game = str(p.get("game", "")).strip()
+        if game in existing_games:
+            print(f"  [Duplicate Blocked] Skipping {game} (Already logged as PENDING).")
+            continue
+
+        pick_date = str(p.get("date", today_date_str)).strip()
         model_prob_str = str(p.get("model_prob", "50.0%"))
         try: odds_val = float(p.get("odds", -110))
         except: odds_val = -110.0
@@ -639,6 +532,7 @@ def main():
             p.get("ai_contextual_shift", "")            
         ], value_input_option="USER_ENTERED")
         appended += 1
+        existing_games.append(game) # Prevent multi-append within the same run
             
     print(f"Execution complete! Added {appended} new pick(s).")
 
