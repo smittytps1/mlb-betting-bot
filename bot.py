@@ -50,7 +50,7 @@ def match_canonical_team(name_str):
     if not name_str: return ""
     cleaned = str(name_str).strip().lower()
     cleaned_norm = normalize_text(cleaned)
-    for canonical, aliases in MLB_TEAM_ALIASES.items():
+    for canonical, aliases in MLB_TEAM_ALIitems():
         for alias in aliases:
             if alias == cleaned or normalize_text(alias) == cleaned_norm or alias in cleaned or cleaned in alias:
                 return canonical.title()
@@ -250,7 +250,6 @@ def fetch_recent_bullpen_usage(days_back=2):
                 canonical = match_canonical_team(team_box.get("team", {}).get("name", ""))
                 if not canonical: continue
 
-                # FIX: Initialize sets to track the actual dates pitchers threw
                 if canonical not in team_stats:
                     team_stats[canonical] = {"raw_pitches": 0, "weighted_load": 0.0, "closer_dates": set(), "setup_dates": set()}
 
@@ -283,7 +282,6 @@ def fetch_recent_bullpen_usage(days_back=2):
     objective_ratings = {}
     for team, stats in team_stats.items():
         load = stats["weighted_load"]
-        # FIX: Only flag as B2B True if they pitched on 2 distinct days
         c_b2b = len(stats["closer_dates"]) >= 2
         s_b2b = len(stats["setup_dates"]) >= 2
 
@@ -647,6 +645,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
     6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that calculates to an Expected Value (EV) of 11.0% or higher. There is NO CAP on the number of picks. If 10 games clear the 11.0% threshold, output all 10. If zero games clear it, output 0.
     7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
+    8. ZERO DATA FABRICATION: Under no circumstances may you invent, estimate, or hallucinate backend load numbers, win percentages, or pitch counts. If you quote a Weighted Backend Load or B2B Burn status in your reasoning, it MUST be extracted verbatim from the 'Bullpen' string provided in the matchup data.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
