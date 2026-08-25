@@ -80,17 +80,34 @@ def compute_quarter_kelly_units(odds, model_prob_str):
     except Exception:
         return 1.0
 
-# --- POISSON DISTRIBUTION MATH ENGINE ---
+# --- ADVANCED POISSON PROBABILITY ENGINE ---
 def poisson_probability(lam, k):
     if lam <= 0: return 0.0
     return (math.exp(-lam) * (lam ** int(k))) / math.factorial(int(k))
 
 def calculate_runline_prob(lam_fav, lam_dog):
+    """Calculates exact Poisson probability of a -1.5 runline cover."""
     prob_cover = 0.0
     for f in range(2, 21):
         for d in range(0, f - 1):
             prob_cover += poisson_probability(lam_fav, f) * poisson_probability(lam_dog, d)
     return max(0.01, min(0.99, prob_cover))
+
+def calculate_total_prob(lam_total, line, is_over=True):
+    """Calculates exact cumulative Poisson probability for Over/Under lines."""
+    prob_exact = 0.0
+    # Sum probabilities up to the line for 'Under', or above for 'Over'
+    floor_line = math.floor(line.0 if isinstance(line, int) else line)
+    
+    for total_runs in range(0, 30):
+        # Calculate joint probability of exact total runs using combined lambda
+        p = poisson_probability(lam_total, total_runs)
+        if is_over and total_runs > line:
+            prob_exact += p
+        elif not is_over and total_runs < line:
+            prob_exact += p
+            
+    return max(0.05, min(0.95, prob_exact))
 
 # --- 1. GOOGLE SHEETS SETUP (STRICTLY MLB TAB, 16 COLUMNS) ---
 def get_sheets():
@@ -123,15 +140,6 @@ def ensure_headers(sheet):
         if not existing or not existing[0] or existing[0][0] != "Date": 
             sheet.insert_row(headers, index=1)
     except Exception: pass
-
-def ensure_evolution_sheet(spreadsheet):
-    try:
-        try: evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
-        except Exception: evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=200, cols=10)
-        if not evo_sheet.get_all_values():
-            evo_sheet.insert_row(["Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"], index=1)
-        return evo_sheet
-    except Exception: return None
 
 # --- 2. ADVANCED METRICS & API SCRAPERS ---
 def fetch_team_advanced_metrics():
@@ -352,7 +360,7 @@ def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigu
     home_prob += 0.015
     math_log.append("HFA: +1.50%")
     
-    home_prob = max(0.40, min(0.60, home_prob))
+    home_prob = max(0.38, min(0.62, home_prob))
     away_prob = 1.0 - home_prob
     
     a_gpg = advanced_metrics.get(away, {}).get("runs_per_game", 4.5)
@@ -544,7 +552,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions to ground your projections. Do NOT output any probability above 65% for any market.
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions to ground your projections for Moneylines, Run Lines, and Totals. Do NOT output any probability above 65% for any market.
 
     === TODAY'S MATCHUPS, MARKET ODDS & BASELINES ===
     {json.dumps(formatted_games, indent=2)}
@@ -556,8 +564,8 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
     1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
     2. THE LEASH (±5.0% MAX): Adjust probabilities by a maximum of ± 5.0% based on holistic contextual intuition.
     3. NO ARTIFICIAL EV MANIPULATION: Calculate the true Expected Value (EV) strictly as: [(Model Prob * Decimal Odds) - 1]. DO NOT reverse-engineer probabilities to fake an 11% EV.
-    4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Evaluate all markets (Moneyline, Run Line, Totals). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
-    5. MAX-EV SIDE SELECTION: If both the Moneyline and Run Line for the same team clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both.
+    4. THE 11.0% THRESHOLD & NO FORCED PICKS: You do NOT have to generate a pick for every game. Fully evaluate ALL markets (Moneyline, Run Line/Spreads, and Totals Over/Under). ONLY select a pick if its true, natural EV is >= 11.0%. Skip games with no value.
+    5. MAX-EV SIDE SELECTION: If multiple markets for the same game (e.g. Moneyline and Run Line) both clear the 11.0% EV threshold, you MUST ONLY output the ONE market with the HIGHEST EV. Do not pick both for the same team.
     6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. Output action "VALIDATED" or "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
@@ -577,14 +585,14 @@ def generate_mlb_picks(formatted_games, open_picks, memory):
           "date": "YYYY-MM-DD",
           "start_time": "YYYY-MM-DD HH:MM PM EDT",
           "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)",
-          "pick": "Team Name",
+          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)",
+          "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
           "odds": 140,
           "implied_prob": "41.6%",
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "High-EV justification",
+          "reasoning": "High-EV justification across metrics",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
