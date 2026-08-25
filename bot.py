@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from google import genai
 from google.genai import errors
+from google.oauth2.service_account import Credentials
 
 # --- TEAM NAME NORMALIZATION & ALIAS MAPPING ---
 MLB_TEAM_ALIASES = {
@@ -91,13 +92,22 @@ def calculate_runline_prob(lam_fav, lam_dog):
             prob_cover += poisson_probability(lam_fav, f) * poisson_probability(lam_dog, d)
     return max(0.01, min(0.99, prob_cover))
 
-# --- 1. GOOGLE SHEETS SETUP ---
+# --- 1. GOOGLE SHEETS SETUP (AUTHENTICATION PATCHED) ---
 def get_sheets():
     print("Connecting to Google Sheets ('Daily' & 'MLB' Tabs)...")
-    scopes = ["[https://www.googleapis.com/auth/spreadsheets](https://www.googleapis.com/auth/spreadsheets)", "[https://www.googleapis.com/auth/drive](https://www.googleapis.com/auth/drive)"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
-    client = gspread.service_account_from_dict(json.loads(service_account_str), scopes=scopes)
+    
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # Direct credential instantiation guarantees the scopes are passed to Google
+    creds_dict = json.loads(service_account_str)
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(credentials)
+    
     spreadsheet = client.open("MLB AI Betting Tracker")
     
     try: daily_sheet = spreadsheet.worksheet("Daily")
@@ -135,7 +145,7 @@ def fetch_team_advanced_metrics():
     metrics_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        teams_url = "[https://statsapi.mlb.com/api/v1/teams?sportId=1](https://statsapi.mlb.com/api/v1/teams?sportId=1)"
+        teams_url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
         teams_resp = requests.get(teams_url, headers=headers, timeout=10)
         if teams_resp.status_code == 200:
             for t in teams_resp.json().get("teams", []):
@@ -144,7 +154,7 @@ def fetch_team_advanced_metrics():
                 if not canonical: continue
                 
                 metrics_map[canonical] = {"ops": 0.720, "iso": 0.150, "whip": 1.30, "runs_per_game": 4.5}
-                stats_url = f"[https://statsapi.mlb.com/api/v1/teams/](https://statsapi.mlb.com/api/v1/teams/){t_id}/stats?stats=season&group=hitting,pitching"
+                stats_url = f"https://statsapi.mlb.com/api/v1/teams/{t_id}/stats?stats=season&group=hitting,pitching"
                 stats_resp = requests.get(stats_url, headers=headers, timeout=5)
                 
                 if stats_resp.status_code == 200:
@@ -167,13 +177,13 @@ def fetch_team_advanced_metrics():
 def fetch_pitcher_season_stats(pitcher_name):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        search_url = f"[https://statsapi.mlb.com/api/v1/people/search?names=](https://statsapi.mlb.com/api/v1/people/search?names=){pitcher_name}&sportIds=1"
+        search_url = f"https://statsapi.mlb.com/api/v1/people/search?names={pitcher_name}&sportIds=1"
         search_resp = requests.get(search_url, headers=headers, timeout=5)
         if search_resp.status_code == 200:
             people = search_resp.json().get("people", [])
             if people:
                 pid = people[0].get("id")
-                stat_url = f"[https://statsapi.mlb.com/api/v1/people/](https://statsapi.mlb.com/api/v1/people/){pid}/stats?stats=season&group=pitching"
+                stat_url = f"https://statsapi.mlb.com/api/v1/people/{pid}/stats?stats=season&group=pitching"
                 stat_resp = requests.get(stat_url, headers=headers, timeout=5)
                 if stat_resp.status_code == 200:
                     splits = stat_resp.json().get("stats", [])[0].get("splits", [])
@@ -190,7 +200,7 @@ def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        espn_resp = requests.get(f"[https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=](https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=){target_date_str.replace('-', '')}", headers=headers, timeout=10)
+        espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
         if espn_resp.status_code == 200:
             for event in espn_resp.json().get("events", []):
                 comps = event.get("competitions", [])
@@ -207,7 +217,7 @@ def fetch_today_probable_pitchers(target_date_str):
     return pitcher_map
 
 def get_mlb_teams_map():
-    url = "[https://statsapi.mlb.com/api/v1/teams?sportId=1](https://statsapi.mlb.com/api/v1/teams?sportId=1)"
+    url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
     resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
     teams = {}
     if resp.status_code == 200:
@@ -224,7 +234,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     
     for d in range(1, days_back_schedule + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
-        schedule_resp = requests.get(f"[https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=](https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=){target_date}", headers=headers, timeout=10)
+        schedule_resp = requests.get(f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}", headers=headers, timeout=10)
         if schedule_resp.status_code != 200: continue
         dates = schedule_resp.json().get("dates", [])
         if not dates: continue
@@ -240,7 +250,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                     team_stats[canonical]["schedule_games_7d"] += 1
 
             if d <= days_back_bp:
-                box_resp = requests.get(f"[https://statsapi.mlb.com/api/v1/game/](https://statsapi.mlb.com/api/v1/game/){game_pk}/boxscore", headers=headers, timeout=10)
+                box_resp = requests.get(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore", headers=headers, timeout=10)
                 if box_resp.status_code != 200: continue
                 box_data = box_resp.json()
 
@@ -375,7 +385,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
 
-        scores_url = f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey=){odds_key}&daysFrom=3"
+        scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
         resp = requests.get(scores_url)
         if resp.status_code != 200: return 0
         scores_data = resp.json()
@@ -452,7 +462,7 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
 
 # --- 6. MATCHUP FORMATTING ---
 def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"[https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=](https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=){odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
+    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
 
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics, memory, today_date_str):
