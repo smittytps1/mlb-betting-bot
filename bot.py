@@ -180,16 +180,13 @@ def fetch_team_high_leverage_hierarchies():
     try:
         teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
         if teams_resp.status_code != 200: return {}
-        
         for t in teams_resp.json().get("teams", []):
             team_id = t.get("id")
             canonical_name = match_canonical_team(t.get("name", ""))
             if not canonical_name: continue
-
             stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
             stats_resp = requests.get(stats_url, headers=headers, timeout=5)
             if stats_resp.status_code != 200: continue
-
             closers, setup_men = [], []
             for roster_item in stats_resp.json().get("roster", []):
                 person = roster_item.get("person", {})
@@ -202,7 +199,6 @@ def fetch_team_high_leverage_hierarchies():
                             holds = int(stat_data.get("holds", 0))
                             if saves >= 2: closers.append((p_name, saves))
                             if holds >= 2: setup_men.append((p_name, holds))
-
             closers.sort(key=lambda x: x[1], reverse=True)
             setup_men.sort(key=lambda x: x[1], reverse=True)
             high_leverage_map[canonical_name] = {
@@ -391,13 +387,19 @@ def update_scoreboard(spreadsheet):
         sb.update(range_name="A1:F2", values=scoreboard_data, value_input_option="USER_ENTERED")
     except Exception: pass
 
-def get_today_existing_picks(sheet, today_date_str):
+def get_today_existing_picks_detailed(sheet, today_date_str):
     rows = sheet.get_all_values()
     if len(rows) <= 1: return []
     existing = []
-    for r in rows[1:]:
+    for idx, r in enumerate(rows[1:], start=2):
         if len(r) > 10 and str(r[0]).strip() == today_date_str and str(r[10]).strip().upper() == "PENDING":
-            existing.append(str(r[2]).strip())
+            existing.append({
+                "row_index": idx,
+                "game": str(r[2]).strip(),
+                "bet_type": str(r[3]).strip(),
+                "pick": str(r[4]).strip(),
+                "odds": float(r[5]) if r[5] else -110.0
+            })
     return existing
 
 # --- 5. MATCHUP FORMATTING ---
@@ -446,7 +448,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 6. AI SYNTHESIS WITH MEMORY FEEDBACK ---
+# --- 6. AI SYNTHESIS & RE-EVALUATION (VALIDATIONS) ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -457,7 +459,7 @@ def parse_json_from_response(response):
         except Exception: pass
     return json.loads(raw_text.replace("```json", "").replace("```", "").strip())
 
-def generate_picks_and_validations(formatted_games, memory):
+def generate_picks_and_validations(formatted_games, open_picks, memory):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
@@ -467,13 +469,27 @@ def generate_picks_and_validations(formatted_games, memory):
     === TODAY'S MATCHUPS & BASELINES ===
     {json.dumps(formatted_games, indent=2)}
 
+    === ACTIVE PENDING PICKS TO RE-EVALUATE ===
+    {json.dumps(open_picks, indent=2)}
+
     STRICT RULES:
     1. THE TIGHT LEASH (±5.0% MAX): Adjust baselines by a maximum of ± 5.0%.
     2. ANTI-HYPE & OBJECTIVITY: Disregard media hype. Base synthesis on hard data.
-    3. THE 11 PERCENT EV THRESHOLD: Recommend picks where final `model_prob` gives an EV of 11.0% or higher.
+    3. THE 11 PERCENT EV THRESHOLD: Recommend new picks where final `model_prob` gives an EV of 11.0% or higher.
+    4. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float>,
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+11.7%",
+          "reason": "<tight summary>"
+        }}
+      ],
       "new_picks": [
         {{
           "date": "YYYY-MM-DD",
@@ -498,7 +514,7 @@ def generate_picks_and_validations(formatted_games, memory):
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 return parse_json_from_response(response)
             except Exception: time.sleep(5)
-    return {"new_picks": []}
+    return {"validations": [], "new_picks": []}
 
 # --- 7. MAIN EXECUTION ---
 def main():
@@ -522,14 +538,42 @@ def main():
     formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory)
     if not formatted_games: return
 
-    existing_games = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(formatted_games, memory)
+    # Grab pending picks to re-evaluate (Validations)
+    open_picks_detailed = get_today_existing_picks_detailed(sheet, today_date_str)
+    
+    ai_response = generate_picks_and_validations(formatted_games, open_picks_detailed, memory)
+    
+    # Process Validations
+    validations = ai_response.get("validations", [])
+    if validations:
+        print(f"Processing {len(validations)} pick validation(s)...")
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            reason = str(val.get("reason", "")).strip()
+            if row_idx and action in ["VALIDATED", "REJECTED"]:
+                sheet.update_cell(row_idx, 14, action) # Validation column
+                if action == "VALIDATED":
+                    if val.get("updated_odds"): sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    if val.get("updated_model_prob"): sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if val.get("updated_expected_value"): sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    if reason: sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                elif action == "REJECTED":
+                    sheet.update_cell(row_idx, 11, "REJECTED")
+                    sheet.update_cell(row_idx, 12, 0.0)
+                    if reason: sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                print(f"  Row {row_idx} re-evaluated as: {action}")
+
+    # Process New Picks (with anti-duplication block)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
+    existing_game_titles = [p["game"] for p in open_picks_detailed]
     
     for p in new_picks:
         game = str(p.get("game", "")).strip()
-        if game in existing_games:
+        if game in existing_game_titles:
             print(f"  [Duplicate Blocked] Skipping {game} (Already logged as PENDING).")
             continue
 
@@ -552,9 +596,9 @@ def main():
             p.get("ai_contextual_shift", "")            
         ], value_input_option="USER_ENTERED")
         appended += 1
-        existing_games.append(game)
+        existing_game_titles.append(game)
             
-    print(f"Execution complete! Added {appended} new pick(s).")
+    print(f"Execution complete! Validated existing picks and added {appended} new pick(s).")
 
 if __name__ == "__main__":
     main()
