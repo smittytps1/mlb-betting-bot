@@ -43,6 +43,8 @@ MLB_TEAM_ALIASES = {
     "washington nationals": ["washington nationals", "nationals", "nats", "wsh", "was", "washington"]
 }
 
+ALLOWED_SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars"]
+
 def normalize_text(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
@@ -319,7 +321,12 @@ def fetch_recent_bullpen_usage(days_back=2):
         elif s_b2b or load >= 60: status = "MODERATELY WORKED (Setup Men Used)"
         else: status = "FRESH / RESTED (Shutdown Arms Available)"
 
-        objective_ratings[team] = f"Status: {status} | Weighted Backend Load: {round(load, 1)}"
+        # FIXED: Return as a dictionary instead of a string to avoid the AttributeError
+        objective_ratings[team] = {
+            "status_string": f"Status: {status} | Weighted Backend Load: {round(load, 1)}",
+            "load": load,
+            "closer_b2b": c_b2b
+        }
 
     return objective_ratings
 
@@ -551,15 +558,19 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
     
-    a_load = fatigue_data.get(away, {}).get("load", 0)
-    h_load = fatigue_data.get(home, {}).get("load", 0)
+    # Properly access the dictionary returned by the fixed fatigue scraper
+    a_load = fatigue_data.get(away, {}).get("load", 0.0)
+    h_load = fatigue_data.get(home, {}).get("load", 0.0)
     bp_shift = (((a_load - h_load) / 100.0) * 0.015) * bp_weight
     home_prob += bp_shift
     math_log.append(f"Bullpen Load (wt {bp_weight}x): {round(bp_shift*100, 2)}%")
     
+    a_closer_b2b = fatigue_data.get(away, {}).get("closer_b2b", False)
+    h_closer_b2b = fatigue_data.get(home, {}).get("closer_b2b", False)
+    
     b2b_shift = 0.0
-    if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += (0.02 * bp_weight)
-    if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= (0.02 * bp_weight)
+    if a_closer_b2b: b2b_shift += (0.02 * bp_weight)
+    if h_closer_b2b: b2b_shift -= (0.02 * bp_weight)
     home_prob += b2b_shift
     
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
@@ -677,10 +688,15 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
             
         game_copy = dict(game)
+        
+        # Accessing the dictionary safely
+        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
+        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
+
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
-            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {objective_fatigue_ratings.get(away, 'Fresh')}",
-            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {objective_fatigue_ratings.get(home, 'Fresh')}"
+            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {away_bp_str}",
+            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {home_bp_str}"
         }
         game_copy["python_math_baseline"] = {
             "away_win_prob_baseline": f"{round(away_prob * 100, 1)}%",
@@ -785,6 +801,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
             try:
                 print(f"Attempting synthesis with model: {model_name} (Attempt {attempt+1})...")
                 response = client.models.generate_content(model=model_name, contents=prompt)
+                print(f"Successfully synthesized matchups using {model_name}...")
                 parsed = parse_json_from_response(response)
                 if parsed and ("new_picks" in parsed or "validations" in parsed):
                     print(f"Success! Model {model_name} generated valid JSON output.")
