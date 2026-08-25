@@ -78,15 +78,22 @@ def compute_quarter_kelly_units(odds, model_prob_str):
     except Exception:
         return 1.0
 
-# --- 1. GOOGLE SHEETS SETUP ---
+# --- 1. GOOGLE SHEETS SETUP (TARGETING 'Daily' TAB) ---
 def get_sheets():
-    print("Connecting to Google Sheets (MLB Tab)...")
+    print("Connecting to Google Sheets ('Daily' Tab)...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
     client = gspread.service_account_from_dict(json.loads(service_account_str), scopes=scopes)
     spreadsheet = client.open("MLB AI Betting Tracker")
-    return spreadsheet, spreadsheet.worksheet("MLB")
+    
+    # Target the 'Daily' tab as requested
+    try:
+        daily_sheet = spreadsheet.worksheet("Daily")
+    except Exception:
+        daily_sheet = spreadsheet.add_worksheet(title="Daily", rows=500, cols=25)
+        
+    return spreadsheet, daily_sheet
 
 def ensure_headers(sheet):
     try:
@@ -163,7 +170,7 @@ def fetch_today_probable_pitchers(target_date_str):
     except Exception: pass
     return pitcher_map
 
-# --- 3. ROBUST BULLPEN SCRAPER ---
+# --- 3. REBUILT FROM SCRATCH: CLEAN BULLPEN CALCULATION ENGINE ---
 def fetch_recent_bullpen_usage(days_back=2):
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -222,9 +229,10 @@ def fetch_recent_bullpen_usage(days_back=2):
         else:
             status = "FRESH"
 
-        breakdown = f"Relief Appearances: {apps} | Total Pitches (2 Days): {total_p}"
+        # Clean, explicit format for Columns Q and R
+        status_string = f"Status: {status} | Load Index: {load} | Relief Apps: {apps} | Total Pitches (2 Days): {total_p}"
         objective_ratings[team] = {
-            "status_string": f"Status: {status} | Load Index: {load} | {breakdown}",
+            "status_string": status_string,
             "load": load,
             "closer_b2b": len(stats["game_dates"]) >= 2
         }
@@ -366,7 +374,7 @@ def update_scoreboard(spreadsheet):
         except: sb = spreadsheet.add_worksheet(title="Scoreboard", rows=20, cols=10)
         scoreboard_data = [
             ["Bot / Sport & Timeframe", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
-            ["MLB Bot (All-Time)", '=COUNTIF(MLB!K:K, "WIN")', '=COUNTIF(MLB!K:K, "LOSS")', '=COUNTIF(MLB!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(MLB!L:L)']
+            ["MLB Bot (All-Time)", '=COUNTIF(Daily!K:K, "WIN")', '=COUNTIF(Daily!K:K, "LOSS")', '=COUNTIF(Daily!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(Daily!L:L)']
         ]
         sb.clear()
         sb.update(range_name="A1:F2", values=scoreboard_data, value_input_option="USER_ENTERED")
@@ -387,7 +395,7 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
             })
     return existing
 
-# --- 5. MATCHUP FORMATTING (STRICT TODAY-ONLY FILTER) ---
+# --- 5. MATCHUP FORMATTING ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -410,14 +418,12 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         if commence_time_str:
             try:
                 dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
-                # Filter out games that have already started
                 if dt_utc < current_utc: continue
                 dt_et = dt_utc.astimezone(ZoneInfo("America/New_York"))
                 game_date_et = dt_et.strftime("%Y-%m-%d")
                 game_time_et = dt_et.strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception: pass
 
-        # STRICT FILTER: Only include games occurring today in Eastern Time
         if game_date_et != today_date_str:
             continue
 
@@ -451,7 +457,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 6. AI SYNTHESIS (UNIVERSAL SCHEMA) ---
+# --- 6. AI SYNTHESIS (FORCING ALL 3 MARKETS PER GAME) ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -476,15 +482,15 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
     === ACTIVE PENDING PICKS TO RE-EVALUATE ===
     {json.dumps(open_picks, indent=2)}
 
-    STRICT RULES & DIRECTIVES:
-    1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}. Do NOT pick from any other books.
-    2. MULTI-MARKET SELECTION CAPABILITY: 
-       - You may pick Moneylines (h2h), Run Lines (spreads), OR Totals (Over/Under). 
-       - You do NOT have to force Run Lines or Totals if Moneyline offers the clearest value, but evaluate all available markets objectively.
-    3. HOLISTIC EVALUATION: Synthesize Starter Peripherals (ERA/WHIP/xFIP), Team OPS, and Home-Field Advantage alongside Bullpen status.
-    4. THE LEASH (±5.0% MAX): Adjust baseline win/cover/total probabilities by a maximum of ± 5.0%.
-    5. THE 11 PERCENT EV THRESHOLD: Recommend picks ONLY where final model probability provides an Expected Value (EV) >= 11.0%.
-    6. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
+    STRICT RULES & MANDATORY MULTI-MARKET OUTPUT:
+    1. APPROVED SPORTSBOOKS ONLY: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
+    2. MANDATORY 3 PICKS PER GAME: For EVERY game provided in today's matchups, you MUST generate and output exactly **THREE separate picks**:
+       - Pick 1: **Moneyline** (select the side with the greatest EV).
+       - Pick 2: **Run Line / Spread** (select the side with the greatest EV, e.g., Team -1.5 or Team +1.5).
+       - Pick 3: **Total Over/Under** (select Over or Under based on the Python projected total vs sportsbook line).
+    3. THE LEASH (±5.0% MAX): Adjust win/total probabilities by a maximum of ± 5.0%.
+    4. THE 11 PERCENT EV THRESHOLD: Recommend picks where final model probability provides an Expected Value (EV) >= 11.0%.
+    5. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -503,14 +509,14 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
           "date": "YYYY-MM-DD",
           "start_time": "YYYY-MM-DD HH:MM PM EDT",
           "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)",
+          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (BetMGM)" or "Total Under (Caesars)",
           "pick": "Team Name" or "Team Name -1.5" or "Over 8.5" or "Under 7.5",
           "odds": -110,
           "implied_prob": "52.4%",
           "model_prob": "55.0%",
           "expected_value": "+11.7%",
           "high_agreement": "Consensus",
-          "reasoning": "Holistic data-driven explanation covering starters, OPS, and bullpen metrics",
+          "reasoning": "Holistic data-driven explanation",
           "ai_contextual_shift": "Shifted +X% because <balanced reason>"
         }}
       ]
@@ -543,10 +549,9 @@ def main():
     odds = fetch_mlb_odds(odds_key)
     if not odds: return
 
-    # Formats ONLY games scheduled for today (EST)
     formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory, today_date_str)
     if not formatted_games:
-        print("No eligible upcoming games found for today.")
+        print("No eligible games found for today.")
         return
 
     open_picks_detailed = get_today_existing_picks_detailed(sheet, today_date_str)
@@ -573,7 +578,6 @@ def main():
                     sheet.update_cell(row_idx, 12, 0.0)
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
-                print(f"  Row {row_idx} re-evaluated as: {action}")
 
     # Process New Picks
     new_picks = ai_response.get("new_picks", [])
@@ -584,15 +588,12 @@ def main():
         game = str(p.get("game", "")).strip()
         bet_type_label = str(p.get("bet_type", "")).strip()
         
-        # Enforce Sportsbook Whitelist Check
         book_matched = any(sb.lower() in bet_type_label.lower() for sb in ALLOWED_SPORTSBOOKS)
         if not book_matched:
-            print(f"  [Filter Blocked] Skipping pick for {game} because sportsbook ({bet_type_label}) is not whitelisted.")
             continue
 
         unique_pick_signature = f"{game} | {bet_type_label}"
         if unique_pick_signature in existing_game_titles:
-            print(f"  [Duplicate Blocked] Skipping {unique_pick_signature} (Already logged).")
             continue
 
         pick_date = str(p.get("date", today_date_str)).strip()
@@ -621,7 +622,7 @@ def main():
         appended += 1
         existing_game_titles.append(unique_pick_signature)
             
-    print(f"Execution complete! Validated existing picks and added {appended} new pick(s).")
+    print(f"Execution complete! Added {appended} new multi-market picks to the 'Daily' tab.")
 
 if __name__ == "__main__":
     main()
