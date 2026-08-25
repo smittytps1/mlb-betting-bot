@@ -159,14 +159,13 @@ def fetch_team_advanced_metrics():
                         elif group_name == "pitching":
                             metrics_map[canonical]["whip"] = float(stat_data.get("whip", "1.30"))
     except Exception as e:
-        print(f"Advanced Metrics Notice: {e}")
+        pass
     return metrics_map
 
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    # 1. Try ESPN API
     try:
         espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
         if espn_resp.status_code == 200:
@@ -183,7 +182,6 @@ def fetch_today_probable_pitchers(target_date_str):
                             if team_name: pitcher_map[team_name] = p_name
     except Exception: pass
 
-    # 2. Try MLB Stats API as a fallback
     try:
         mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
         mlb_resp = requests.get(mlb_url, headers=headers, timeout=10)
@@ -317,35 +315,30 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics):
     home_prob = 0.50 
     math_log = []
     
-    # 1. Bullpen Load Mismatch
     a_load = fatigue_data.get(away, {}).get("load", 0)
     h_load = fatigue_data.get(home, {}).get("load", 0)
     bp_shift = ((a_load - h_load) / 100.0) * 0.015
     home_prob += bp_shift
     math_log.append(f"Bullpen Load: {round(bp_shift*100, 2)}%")
     
-    # 2. B2B Closer Penalty
     b2b_shift = 0.0
     if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += 0.02
     if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= 0.02
     home_prob += b2b_shift
     if b2b_shift != 0: math_log.append(f"B2B Closer Penalty: {round(b2b_shift*100, 2)}%")
     
-    # 3. Offense OPS Matchup
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
     ops_shift = ((h_ops - a_ops) / 0.050) * 0.02
     home_prob += ops_shift
     math_log.append(f"OPS Shift: {round(ops_shift*100, 2)}%")
     
-    # 4. Pitching WHIP
     a_whip = advanced_metrics.get(away, {}).get("whip", 1.30)
     h_whip = advanced_metrics.get(home, {}).get("whip", 1.30)
     whip_shift = ((a_whip - h_whip) / 0.10) * 0.015
     home_prob += whip_shift
     math_log.append(f"WHIP Shift: {round(whip_shift*100, 2)}%")
     
-    # HFA
     home_prob += 0.015
     math_log.append("HFA: +1.50%")
     
@@ -381,7 +374,7 @@ def auto_grade_pending_bets(sheet, odds_key):
             game_title = str(r[game_idx]).strip()
             bet_type = str(r[bet_type_idx]).strip().lower()
             pick_str = str(r[pick_idx]).strip()
-            logged_start_time = str(r[start_time_idx]).strip() if start_time_idx != -1 and len(r) > start_time_idx else ""
+            
             try: odds = float(r[odds_idx])
             except: odds = -110.0
             try: units = float(r[units_idx]) if r[units_idx] else 1.0
@@ -455,7 +448,9 @@ def get_today_existing_picks(sheet, today_date_str):
 
 def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics):
     valid = []
+    matchup_cache = {}  # Python stores the exact math here to prevent AI hallucinations
     current_utc = datetime.now(ZoneInfo("UTC"))
+    
     for game in odds_data:
         home, away = match_canonical_team(game.get("home_team", "")), match_canonical_team(game.get("away_team", ""))
         commence_time_str = game.get("commence_time")
@@ -464,7 +459,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
             try:
                 dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
                 if dt_utc < current_utc:
-                    print(f"  [Time Filter] Dropping {away} @ {home} (Game Already Started at {dt_utc})")
+                    print(f"  [Time Filter] Dropping {away} @ {home} (Game Already Started)")
                     continue
                 game_time_et = dt_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception: pass
@@ -473,11 +468,23 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         a_pitcher = probable_pitchers.get(away, "TBD")
         
         home_prob, away_prob, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics)
+        
+        # Save exact string data securely in Python's cache
+        away_bp_str = objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')
+        home_bp_str = objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')
+        
+        game_key = f"{away} @ {home}"
+        matchup_cache[game_key] = {
+            "away_bp": away_bp_str,
+            "home_bp": home_bp_str,
+            "math": math_log
+        }
+
         game_copy = dict(game)
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
-            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {objective_fatigue_ratings.get(away, {}).get('status_string', 'Status: FRESH | Math: N/A')} | OPS: {advanced_metrics.get(away, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(away, {}).get('whip', 1.30)}",
-            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {objective_fatigue_ratings.get(home, {}).get('status_string', 'Status: FRESH | Math: N/A')} | OPS: {advanced_metrics.get(home, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(home, {}).get('whip', 1.30)}"
+            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {away_bp_str} | OPS: {advanced_metrics.get(away, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(away, {}).get('whip', 1.30)}",
+            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {home_bp_str} | OPS: {advanced_metrics.get(home, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(home, {}).get('whip', 1.30)}"
         }
         game_copy["python_math_baseline"] = {
             "away_win_prob_baseline": f"{round(away_prob * 100, 1)}%",
@@ -485,9 +492,8 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
             "calculation_log": math_log
         }
         
-        print(f"  [Math Baseline] {away} ({round(away_prob * 100, 1)}%) @ {home} ({round(home_prob * 100, 1)}%)")
         valid.append(game_copy)
-    return valid
+    return valid, matchup_cache
 
 # --- 8. AI BOUNDED ADJUSTER ---
 def parse_json_from_response(response):
@@ -500,30 +506,34 @@ def parse_json_from_response(response):
         except Exception: pass
     return json.loads(raw_text.replace("```json", "").replace("```", "").strip())
 
-def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_ratings, probable_pitchers, advanced_metrics):
+def generate_picks_and_validations(formatted_games, memory, open_picks):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
-    formatted_games = format_matchups(odds_data, probable_pitchers, fatigue_ratings, advanced_metrics)
-    if not formatted_games: 
-        print("WARNING: 0 games passed the pre-game filters.")
-        return {"validations": [], "new_picks": []}
-        
-    print(f"Sending {len(formatted_games)} mathematically scored matchups to the AI for Contextual Adjustment...")
 
     prompt = f"""
-    You are a Bounded Contextual Adjuster. Python has already calculated the strict mathematical baseline win probability for these MLB matchups based on Bullpen Load, OPS, and WHIP.
+    You are an elite Bounded Contextual Adjuster. Python has already calculated the strict mathematical baseline win probability for these MLB matchups. 
 
     === TODAY'S MATCHUPS & PYTHON MATH BASELINE ===
     {json.dumps(formatted_games, indent=2)}
 
     STRICT RULES:
-    1. THE LEASH: You may only adjust Python's 'home_win_prob_baseline' or 'away_win_prob_baseline' by a MAXIMUM of ± 5.0%.
-    2. CONTEXT ONLY: Your adjustment must be based on qualitative edges (e.g., severe weather, umpiring, extreme travel constraints, or market consensus divergence). Do not recount the bullpen math.
+    1. THE LEASH: You may only adjust Python's 'home_win_prob_baseline' or 'away_win_prob_baseline' by a MAXIMUM of ± 8.0%.
+    2. CONTEXT, NEWS & PITCHERS: Use your broad knowledge base to evaluate the specific Starting Pitchers listed (e.g., historical xFIP, recent form, splits). Synthesize any recent MLB news, injury reports, weather anomalies, or umpire tendencies to make your final probability adjustment. 
     3. THE 11 PERCENT THRESHOLD: Recommend picks where your final adjusted `model_prob` provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds.
-    4. NO FABRICATION: Do not invent any numbers.
+    4. NO FABRICATION: Do not invent any numbers. Do not rewrite Python's math. 
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float>,
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+11.7%",
+          "reason": "<tight summary>"
+        }}
+      ],
       "new_picks": [
         {{
           "date": "YYYY-MM-DD",
@@ -536,11 +546,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "model_prob": "57.5%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<Summary of why you added the context shift>",
-          "away_bullpen": "<verbatim away bullpen string from context>",
-          "home_bullpen": "<verbatim home bullpen string from context>",
-          "python_math_baseline": "<verbatim calculation_log from context>",
-          "ai_contextual_shift": "Shifted X% because <reason>"
+          "reasoning": "<Summary of the starting pitcher edges or news you used to shift the baseline>",
+          "ai_contextual_shift": "Shifted +X% because <reason>"
         }}
       ]
     }}
@@ -581,10 +588,37 @@ def main():
         print("Error: No odds returned from API.")
         return
 
-    open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(odds, memory, open_picks, fatigue_data, probable_pitchers, advanced_metrics)
-    new_picks = ai_response.get("new_picks", [])
+    # Python caches the exact math so Gemini can't hallucinate it
+    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics)
     
+    if not formatted_games:
+        print("WARNING: 0 games passed the pre-game filters.")
+        return
+
+    print(f"Sending {len(formatted_games)} mathematically scored matchups to the AI for Contextual Adjustment...")
+    open_picks = get_today_existing_picks(sheet, today_date_str)
+    ai_response = generate_picks_and_validations(formatted_games, memory, open_picks)
+    
+    # Process Validations
+    validations = ai_response.get("validations", [])
+    if validations:
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            if row_idx and action in ["VALIDATED", "REJECTED"]:
+                sheet.update_cell(row_idx, 14, action)
+                if action == "VALIDATED":
+                    if val.get("updated_odds"): sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    if val.get("updated_model_prob"): sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if val.get("updated_expected_value"): sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                elif action == "REJECTED":
+                    sheet.update_cell(row_idx, 11, "REJECTED")
+                    sheet.update_cell(row_idx, 12, 0.0)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+
+    # Process New Picks
+    new_picks = ai_response.get("new_picks", [])
     appended = 0
     raw_rows = sheet.get_all_values()
     
@@ -596,16 +630,19 @@ def main():
         except: odds_val = -110.0
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+        
+        # Python retrieves the secure, un-hallucinated string data
+        cache_data = matchup_cache.get(game, {})
 
         sheet.append_row([
             pick_date, current_time_str, game, str(p.get("bet_type", "")).strip(), str(p.get("pick", "")).strip(), int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
             str(p.get("start_time", "")).strip(),
-            p.get("away_bullpen", ""),
-            p.get("home_bullpen", ""),
-            p.get("python_math_baseline", ""),
-            p.get("ai_contextual_shift", "")
+            cache_data.get("away_bp", "N/A"),           # Secure Injection Column Q
+            cache_data.get("home_bp", "N/A"),           # Secure Injection Column R
+            cache_data.get("math", "N/A"),              # Secure Injection Column S
+            p.get("ai_contextual_shift", "")            # AI Output Column T
         ], value_input_option="USER_ENTERED")
         appended += 1
             
