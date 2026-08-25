@@ -538,9 +538,7 @@ def main():
     formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory)
     if not formatted_games: return
 
-    # Grab pending picks to re-evaluate (Validations)
     open_picks_detailed = get_today_existing_picks_detailed(sheet, today_date_str)
-    
     ai_response = generate_picks_and_validations(formatted_games, open_picks_detailed, memory)
     
     # Process Validations
@@ -552,7 +550,7 @@ def main():
             action = str(val.get("action", "")).strip().upper()
             reason = str(val.get("reason", "")).strip()
             if row_idx and action in ["VALIDATED", "REJECTED"]:
-                sheet.update_cell(row_idx, 14, action) # Validation column
+                sheet.update_cell(row_idx, 14, action)
                 if action == "VALIDATED":
                     if val.get("updated_odds"): sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
                     if val.get("updated_model_prob"): sheet.update_cell(row_idx, 8, val["updated_model_prob"])
@@ -566,7 +564,7 @@ def main():
                     sheet.update_cell(row_idx, 2, current_time_str)
                 print(f"  Row {row_idx} re-evaluated as: {action}")
 
-    # Process New Picks (with anti-duplication block)
+    # Process New Picks (with robust normalized cache lookup & anti-duplication)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
     existing_game_titles = [p["game"] for p in open_picks_detailed]
@@ -583,7 +581,13 @@ def main():
         except: odds_val = -110.0
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
-        cache_data = matchup_cache.get(game, {})
+        
+        # Robust normalized lookup to completely prevent N/A values in Columns Q & R
+        cache_data = {}
+        for cached_key, data in matchup_cache.items():
+            if normalize_text(cached_key) == normalize_text(game):
+                cache_data = data
+                break
 
         sheet.append_row([
             pick_date, current_time_str, game, str(p.get("bet_type", "")).strip(), str(p.get("pick", "")).strip(), int(round(odds_val)),
