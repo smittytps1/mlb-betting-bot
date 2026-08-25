@@ -161,57 +161,8 @@ def fetch_today_probable_pitchers(target_date_str):
     except Exception: pass
     return pitcher_map
 
-# --- 3. FULL-HIERARCHY BULLPEN & MULTI-MARKET MATH ENGINE ---
-def load_memory():
-    if os.path.exists("bot_memory.json"):
-        try:
-            with open("bot_memory.json", "r") as f: return json.load(f)
-        except Exception: pass
-    return {
-        "total_bets": 0, "wins": 0, "losses": 0,
-        "reasoning_factor_weights": {
-            "bullpen_depth_and_fatigue": {"weight": 1.0},
-            "platoon_and_lineup_splits": {"weight": 1.0},
-            "starting_pitcher_expected_metrics": {"weight": 1.0}
-        }
-    }
-
-def fetch_team_high_leverage_hierarchies():
-    high_leverage_map = {}
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
-        if teams_resp.status_code != 200: return {}
-        for t in teams_resp.json().get("teams", []):
-            team_id = t.get("id")
-            canonical_name = match_canonical_team(t.get("name", ""))
-            if not canonical_name: continue
-            stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
-            stats_resp = requests.get(stats_url, headers=headers, timeout=5)
-            if stats_resp.status_code != 200: continue
-            closers, setup_men = [], []
-            for roster_item in stats_resp.json().get("roster", []):
-                person = roster_item.get("person", {})
-                p_name = person.get("fullName", "")
-                for s in person.get("stats", []):
-                    if s.get("type", {}).get("displayName") == "season":
-                        for split in s.get("splits", []):
-                            stat_data = split.get("stat", {})
-                            saves = int(stat_data.get("saves", 0))
-                            holds = int(stat_data.get("holds", 0))
-                            if saves >= 2: closers.append((p_name, saves))
-                            if holds >= 2: setup_men.append((p_name, holds))
-            closers.sort(key=lambda x: x[1], reverse=True)
-            setup_men.sort(key=lambda x: x[1], reverse=True)
-            high_leverage_map[canonical_name] = {
-                "closer": closers[0][0] if closers else "Unknown Closer",
-                "setup": [s[0] for s in setup_men[:2]]
-            }
-    except Exception: pass
-    return high_leverage_map
-
+# --- 3. REBUILT FROM SCRATCH: ROBUST BULLPEN ENGINE ---
 def fetch_recent_bullpen_usage(days_back=2):
-    hl_hierarchy = fetch_team_high_leverage_hierarchies()
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
     team_stats = {}
@@ -238,50 +189,65 @@ def fetch_recent_bullpen_usage(days_back=2):
 
                 if canonical not in team_stats:
                     team_stats[canonical] = {
-                        "closer_dates": set(), "setup_dates": set(),
-                        "closer_pitches": 0, "setup_pitches": 0, "middle_pitches": 0
+                        "appearances": 0,
+                        "total_pitches": 0,
+                        "game_dates": set()
                     }
 
-                hierarchy = hl_hierarchy.get(canonical, {"closer": "", "setup": []})
-                closer_name = hierarchy.get("closer")
-                setup_names = hierarchy.get("setup", [])
                 pitchers = team_box.get("pitchers", [])
                 players = team_box.get("players", {})
 
+                # Relief pitchers are all pitchers who appeared after the starting pitcher (index 0)
                 if len(pitchers) > 1:
-                    for pid in pitchers[1:]:
+                    relief_pitcher_ids = pitchers[1:]
+                    game_relief_pitches = 0
+                    for pid in relief_pitcher_ids:
                         p_info = players.get(f"ID{pid}", {})
-                        p_name = p_info.get("person", {}).get("fullName", "")
                         p_stats = p_info.get("stats", {}).get("pitching", {})
                         pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
+                        game_relief_pitches += pitches
 
-                        if p_name == closer_name:
-                            team_stats[canonical]["closer_dates"].add(target_date)
-                            team_stats[canonical]["closer_pitches"] += pitches
-                        elif p_name in setup_names:
-                            team_stats[canonical]["setup_dates"].add(target_date)
-                            team_stats[canonical]["setup_pitches"] += pitches
-                        else:
-                            team_stats[canonical]["middle_pitches"] += pitches
+                    if game_relief_pitches > 0:
+                        team_stats[canonical]["total_pitches"] += game_relief_pitches
+                        team_stats[canonical]["game_dates"].add(target_date)
+                        team_stats[canonical]["appearances"] += len(relief_pitcher_ids)
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        cp, sp, mp = stats["closer_pitches"], stats["setup_pitches"], stats["middle_pitches"]
-        load = (cp * 3.0) + (sp * 2.0) + (mp * 1.0)
-        c_b2b = len(stats["closer_dates"]) >= 2
-        s_b2b = len(stats["setup_dates"]) >= 2
+        total_p = stats["total_pitches"]
+        apps = stats["appearances"]
+        # Normalizing multi-game bullpen workload over the window (expected ~30-50 pitches per game for a bullpen)
+        load = round(float(total_p) / max(1.0, float(len(stats["game_dates"]))), 1)
+        
+        # Determine status cleanly
+        if load >= 45.0 or len(stats["game_dates"]) >= 2:
+            status = "TAXED"
+        elif load >= 25.0:
+            status = "MODERATELY WORKED"
+        else:
+            status = "FRESH"
 
-        if c_b2b or load >= 120: status = f"TAXED (Closer B2B: {c_b2b})"
-        elif s_b2b or load >= 70: status = "MODERATELY WORKED"
-        else: status = "FRESH"
-
-        breakdown = f"(Closer: {cp}x3) + (Setup: {sp}x2) + (Middle: {mp}x1)"
+        breakdown = f"Relief Appearances: {apps} | Total Pitches (2 Days): {total_p}"
         objective_ratings[team] = {
-            "status_string": f"Status: {status} | Load: {round(load, 1)} | Math: {breakdown}",
+            "status_string": f"Status: {status} | Load Index: {load} | {breakdown}",
             "load": load,
-            "closer_b2b": c_b2b
+            "closer_b2b": len(stats["game_dates"]) >= 2
         }
     return objective_ratings
+
+def load_memory():
+    if os.path.exists("bot_memory.json"):
+        try:
+            with open("bot_memory.json", "r") as f: return json.load(f)
+        except Exception: pass
+    return {
+        "total_bets": 0, "wins": 0, "losses": 0,
+        "reasoning_factor_weights": {
+            "bullpen_depth_and_fatigue": {"weight": 1.0},
+            "platoon_and_lineup_splits": {"weight": 1.0},
+            "starting_pitcher_expected_metrics": {"weight": 1.0}
+        }
+    }
 
 def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory):
     home_prob = 0.50 
@@ -292,16 +258,11 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
     
-    a_load = fatigue_data.get(away, {}).get("load", 0)
-    h_load = fatigue_data.get(home, {}).get("load", 0)
-    bp_shift = (((a_load - h_load) / 100.0) * 0.015) * bp_weight
+    a_load = fatigue_data.get(away, {}).get("load", 25.0)
+    h_load = fatigue_data.get(home, {}).get("load", 25.0)
+    bp_shift = (((a_load - h_load) / 50.0) * 0.015) * bp_weight
     home_prob += bp_shift
-    math_log.append(f"Bullpen Load (wt {bp_weight}x): {round(bp_shift*100, 2)}%")
-    
-    b2b_shift = 0.0
-    if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += (0.02 * bp_weight)
-    if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= (0.02 * bp_weight)
-    home_prob += b2b_shift
+    math_log.append(f"Bullpen Load Shift (wt {bp_weight}x): {round(bp_shift*100, 2)}%")
     
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
@@ -431,7 +392,7 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
             })
     return existing
 
-# --- 5. MATCHUP FORMATTING (ROBUST CANONICAL CACHING) ---
+# --- 5. MATCHUP FORMATTING ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -461,12 +422,11 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
-        # Pull securely using canonical lookup keys with robust fallback checks
-        away_bp_data = objective_fatigue_ratings.get(away, objective_fatigue_ratings.get(raw_away, {"status_string": "Status: FRESH | Math: N/A"}))
-        home_bp_data = objective_fatigue_ratings.get(home, objective_fatigue_ratings.get(raw_home, {"status_string": "Status: FRESH | Math: N/A"}))
+        away_bp_data = objective_fatigue_ratings.get(away, objective_fatigue_ratings.get(raw_away, {"status_string": "Status: FRESH | Load Index: 25.0"}))
+        home_bp_data = objective_fatigue_ratings.get(home, objective_fatigue_ratings.get(raw_home, {"status_string": "Status: FRESH | Load Index: 25.0"}))
         
-        away_bp_str = away_bp_data.get('status_string', 'Status: FRESH | Math: N/A')
-        home_bp_str = home_bp_data.get('status_string', 'Status: FRESH | Math: N/A')
+        away_bp_str = away_bp_data.get('status_string', 'Status: FRESH | Load Index: 25.0')
+        home_bp_str = home_bp_data.get('status_string', 'Status: FRESH | Load Index: 25.0')
         
         game_key = f"{away} @ {home}"
         matchup_cache[game_key] = {"away_bp": away_bp_str, "home_bp": home_bp_str, "math": math_log}
@@ -486,7 +446,7 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         valid.append(game_copy)
     return valid, matchup_cache
 
-# --- 6. AI SYNTHESIS & MULTI-MARKET SELECTION ---
+# --- 6. AI SYNTHESIS & BALANCED MULTI-FACTOR ADJUSTER ---
 def parse_json_from_response(response):
     raw_text = getattr(response, "text", "")
     if hasattr(response, "candidates") and response.candidates:
@@ -504,7 +464,7 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an elite Bounded Contextual Adjuster. Python has calculated strict baselines using active factor memory weights: {json.dumps(memory.get('reasoning_factor_weights', {}))}
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has calculated strict baselines using active factor memory weights: {json.dumps(memory.get('reasoning_factor_weights', {}))}
 
     === TODAY'S MATCHUPS, MARKET ODDS & BASELINES ===
     {json.dumps(formatted_games, indent=2)}
@@ -512,10 +472,10 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
     === ACTIVE PENDING PICKS TO RE-EVALUATE ===
     {json.dumps(open_picks, indent=2)}
 
-    STRICT RULES:
-    1. MULTI-MARKET EVALUATION: Look across ALL available markets provided in the game data (Moneyline/h2h, Run Lines/spreads, and Totals/over-under). Choose the best value bet type per game (can be Moneyline, Run Line spread, or Over/Under total).
-    2. THE LEASH: Adjust win/total probabilities by a maximum of ± 5.0%.
-    3. THE 11 PERCENT EV THRESHOLD: Recommend new picks where final model probability provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds.
+    STRICT RULES & SYNTHESIS DIRECTIVES:
+    1. HOLISTIC FACTOR EVALUATION: Do NOT fixate solely on bullpen load. Your contextual adjustments must evaluate ALL available components together: Starting Pitcher metrics (ERA/WHIP/xFIP), Team OPS splits, Home Field Advantage, and Bullpen workloads combined.
+    2. THE LEASH (±5.0% MAX): Adjust win/total probabilities by a maximum of ± 5.0%.
+    3. THE 11 PERCENT EV THRESHOLD: Recommend new picks where final model probability provides an Expected Value (EV) of 11.0% or higher against the sportsbook odds across any market (Moneyline, Run Lines, or Totals).
     4. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
 
     OUTPUT SCHEMA (STRICT JSON):
@@ -542,8 +502,8 @@ def generate_picks_and_validations(formatted_games, open_picks, memory):
           "model_prob": "55.0%",
           "expected_value": "+11.7%",
           "high_agreement": "Consensus",
-          "reasoning": "Data-driven explanation",
-          "ai_contextual_shift": "Shifted +X% because strict factual reason"
+          "reasoning": "Holistic data-driven explanation covering starters, OPS, and bullpen factors",
+          "ai_contextual_shift": "Shifted +X% because <balanced multi-factor reason>"
         }}
       ]
     }}
@@ -625,7 +585,6 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
         
-        # Robust normalized lookup to completely prevent N/A values in Columns Q & R
         cache_data = {}
         for cached_key, data in matchup_cache.items():
             if normalize_text(cached_key) == normalize_text(game):
