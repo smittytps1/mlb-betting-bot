@@ -320,7 +320,6 @@ def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory
     
     home_prob = max(0.05, min(0.95, home_prob))
     
-    # Calculate projected total runs for Over/Under baselines
     a_gpg = advanced_metrics.get(away, {}).get("runs_per_game", 4.5)
     h_gpg = advanced_metrics.get(home, {}).get("runs_per_game", 4.5)
     projected_total = round(a_gpg + h_gpg, 1)
@@ -384,15 +383,12 @@ def auto_grade_pending_bets(sheet, odds_key):
                         winner = home_team if home_score > away_score else away_team
                         status = "WIN" if match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() else "LOSS"
                     elif "spread" in bet_type or "run line" in bet_type:
-                        # e.g., Pick: "Detroit Tigers -1.5"
                         favored_team = pick_str.rsplit(' ', 1)[0]
                         try: spread_val = float(pick_str.split(' ')[-1])
                         except: spread_val = 0.0
-                        
                         h_covered = (home_score + spread_val) > away_score if match_canonical_team(favored_team).lower() == match_canonical_team(home_team).lower() else (away_score + spread_val) > home_score
                         status = "WIN" if h_covered else "LOSS"
                     elif "total" in bet_type or "over" in bet_type or "under" in bet_type:
-                        # e.g., Pick: "Over 8.5"
                         try: line_val = float(pick_str.split(' ')[-1])
                         except: line_val = 0.0
                         is_over = "over" in pick_str.lower()
@@ -435,7 +431,7 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
             })
     return existing
 
-# --- 5. MATCHUP FORMATTING (MULTI-MARKET) ---
+# --- 5. MATCHUP FORMATTING (ROBUST CANONICAL CACHING) ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -446,7 +442,11 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
     current_utc = datetime.now(ZoneInfo("UTC"))
     
     for game in odds_data:
-        home, away = match_canonical_team(game.get("home_team", "")), match_canonical_team(game.get("away_team", ""))
+        raw_home = game.get("home_team", "")
+        raw_away = game.get("away_team", "")
+        home = match_canonical_team(raw_home)
+        away = match_canonical_team(raw_away)
+        
         commence_time_str = game.get("commence_time")
         game_time_et = "Unknown Time"
         if commence_time_str:
@@ -461,8 +461,9 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
         
-        away_bp_data = objective_fatigue_ratings.get(away, {"status_string": "Status: FRESH | Math: N/A"})
-        home_bp_data = objective_fatigue_ratings.get(home, {"status_string": "Status: FRESH | Math: N/A"})
+        # Pull securely using canonical lookup keys with robust fallbacks
+        away_bp_data = objective_fatigue_ratings.get(away, objective_fatigue_ratings.get(raw_away, {"status_string": "Status: FRESH | Math: N/A"}))
+        home_bp_data = objective_fatigue_ratings.get(home, objective_fatigue_ratings.get(raw_home, {"status_string": "Status: FRESH | Math: N/A"}))
         
         away_bp_str = away_bp_data.get('status_string', 'Status: FRESH | Math: N/A')
         home_bp_str = home_bp_data.get('status_string', 'Status: FRESH | Math: N/A')
@@ -606,14 +607,13 @@ def main():
     # Process New Picks (Multi-Market & Anti-Duplication)
     new_picks = ai_response.get("new_picks", [])
     appended = 0
-    existing_game_titles = [p["game"] for p in open_picks_detailed]
+    existing_game_titles = [f"{p['game']} | {p['bet_type']}" for p in open_picks_detailed]
     
     for p in new_picks:
         game = str(p.get("game", "")).strip()
         bet_type_label = str(p.get("bet_type", "")).strip()
-        
-        # Check duplicate per unique game + market combination
         unique_pick_signature = f"{game} | {bet_type_label}"
+        
         if unique_pick_signature in existing_game_titles:
             print(f"  [Duplicate Blocked] Skipping {unique_pick_signature} (Already logged).")
             continue
