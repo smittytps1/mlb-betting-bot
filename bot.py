@@ -644,11 +644,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate schedule fatigue.
     4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
-    6. PORTFOLIO CAP & EV UPGRADES: You maintain a maximum of 5 ACTIVE pending picks per day. Rank all current and potential edges by Expected Value (EV %). 
-       - If you have room in the 5-pick cap, add the highest-EV available plays to `new_picks`.
-       - If you find a new matchup with a mathematically higher EV than an existing pending pick, output "REJECTED" for the weaker pending pick in the validations array, and add the new higher-EV play to `new_picks`.
-       - If a pending pick's value has degraded due to line movement or new bullpen data, REJECT it.
-    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, you MUST evaluate each against current odds and return a corresponding object in the 'validations' array with action 'VALIDATED' or 'REJECTED'. If empty, return an empty array (`"validations": []`).
+    6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that calculates to an Expected Value (EV) of 11.0% or higher. There is NO CAP on the number of picks. If 10 games clear the 11.0% threshold, output all 10. If zero games clear it, output 0.
+    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -659,7 +656,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "updated_odds": <int or float, e.g. -110>,
           "updated_implied_prob": "52.4%",
           "updated_model_prob": "58.0%",
-          "updated_expected_value": "+10.7%",
+          "updated_expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
           "reason": "<tight summary>"
         }}
@@ -674,7 +671,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "odds": -110,
           "implied_prob": "52.4%",
           "model_prob": "58.0%",
-          "expected_value": "+10.7%",
+          "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
           "reasoning": "<tight summary highlighting specific drivers including start times>"
         }}
@@ -767,9 +764,8 @@ def main():
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
                 elif action == "REJECTED":
-                    # Update status to REJECTED so the auto-grader ignores it
                     sheet.update_cell(row_idx, 11, "REJECTED")
-                    sheet.update_cell(row_idx, 12, 0.0) # Ensure P/L registers as flat zero
+                    sheet.update_cell(row_idx, 12, 0.0)
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
 
