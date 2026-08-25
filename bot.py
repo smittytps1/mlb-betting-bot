@@ -96,15 +96,14 @@ def calculate_runline_prob(lam_fav, lam_dog):
 def calculate_total_prob(lam_total, line, is_over=True):
     """Calculates exact cumulative Poisson probability for Over/Under lines."""
     prob_exact = 0.0
-    # Sum probabilities up to the line for 'Under', or above for 'Over'
-    floor_line = math.floor(line.0 if isinstance(line, int) else line)
+    # Fixed syntax error: explicitly using float conversion instead of malformed float literal
+    numeric_line = float(line)
     
     for total_runs in range(0, 30):
-        # Calculate joint probability of exact total runs using combined lambda
         p = poisson_probability(lam_total, total_runs)
-        if is_over and total_runs > line:
+        if is_over and total_runs > numeric_line:
             prob_exact += p
-        elif not is_over and total_runs < line:
+        elif not is_over and total_runs < numeric_line:
             prob_exact += p
             
     return max(0.05, min(0.95, prob_exact))
@@ -140,6 +139,15 @@ def ensure_headers(sheet):
         if not existing or not existing[0] or existing[0][0] != "Date": 
             sheet.insert_row(headers, index=1)
     except Exception: pass
+
+def ensure_evolution_sheet(spreadsheet):
+    try:
+        try: evo_sheet = spreadsheet.worksheet("Evolution & Learnings")
+        except Exception: evo_sheet = spreadsheet.add_worksheet(title="Evolution & Learnings", rows=200, cols=10)
+        if not evo_sheet.get_all_values():
+            evo_sheet.insert_row(["Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"], index=1)
+        return evo_sheet
+    except Exception: return None
 
 # --- 2. ADVANCED METRICS & API SCRAPERS ---
 def fetch_team_advanced_metrics():
