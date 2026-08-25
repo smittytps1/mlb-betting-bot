@@ -139,7 +139,37 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. MULTI-SOURCE PROBABLES (ESPN + MLB STATS API) ---
+# --- 2. ADVANCED METRICS & PROBABLES ---
+def fetch_team_advanced_metrics():
+    metrics_map = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        teams_url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
+        teams_resp = requests.get(teams_url, headers=headers, timeout=10)
+        if teams_resp.status_code == 200:
+            for t in teams_resp.json().get("teams", []):
+                t_id = t.get("id")
+                canonical = match_canonical_team(t.get("name", ""))
+                if not canonical: continue
+                
+                metrics_map[canonical] = {"ops": 0.720, "whip": 1.30, "runs_per_game": 4.5}
+                stats_url = f"https://statsapi.mlb.com/api/v1/teams/{t_id}/stats?stats=season&group=hitting,pitching"
+                stats_resp = requests.get(stats_url, headers=headers, timeout=5)
+                
+                if stats_resp.status_code == 200:
+                    for stat_group in stats_resp.json().get("stats", []):
+                        group_name = stat_group.get("group", {}).get("displayName")
+                        splits = stat_group.get("splits", [])
+                        if not splits: continue
+                        stat_data = splits[0].get("stat", {})
+                        if group_name == "hitting":
+                            metrics_map[canonical]["ops"] = float(stat_data.get("ops", ".720"))
+                            metrics_map[canonical]["runs_per_game"] = float(stat_data.get("runsScoredPerGame", "4.5"))
+                        elif group_name == "pitching":
+                            metrics_map[canonical]["whip"] = float(stat_data.get("whip", "1.30"))
+    except Exception: pass
+    return metrics_map
+
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -512,6 +542,49 @@ def update_memory_from_sheet(sheet, memory):
         print(f"Memory update notice: {e}")
     return memory
 
+def calculate_strict_baseline(away, home, fatigue_data, advanced_metrics, memory):
+    home_prob = 0.50 
+    math_log = []
+    weights = memory.get("reasoning_factor_weights", {})
+    
+    bp_weight = weights.get("bullpen_depth_and_fatigue", {}).get("weight", 1.0)
+    ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
+    whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
+    
+    a_load = fatigue_data.get(away, {}).get("load", 0)
+    h_load = fatigue_data.get(home, {}).get("load", 0)
+    bp_shift = (((a_load - h_load) / 100.0) * 0.015) * bp_weight
+    home_prob += bp_shift
+    math_log.append(f"Bullpen Load (wt {bp_weight}x): {round(bp_shift*100, 2)}%")
+    
+    b2b_shift = 0.0
+    if fatigue_data.get(away, {}).get("closer_b2b"): b2b_shift += (0.02 * bp_weight)
+    if fatigue_data.get(home, {}).get("closer_b2b"): b2b_shift -= (0.02 * bp_weight)
+    home_prob += b2b_shift
+    
+    a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
+    h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
+    ops_shift = (((h_ops - a_ops) / 0.050) * 0.02) * ops_weight
+    home_prob += ops_shift
+    math_log.append(f"OPS Shift (wt {ops_weight}x): {round(ops_shift*100, 2)}%")
+    
+    a_whip = advanced_metrics.get(away, {}).get("whip", 1.30)
+    h_whip = advanced_metrics.get(home, {}).get("whip", 1.30)
+    whip_shift = (((a_whip - h_whip) / 0.10) * 0.015) * whip_weight
+    home_prob += whip_shift
+    math_log.append(f"WHIP Shift (wt {whip_weight}x): {round(whip_shift*100, 2)}%")
+    
+    home_prob += 0.015
+    math_log.append("HFA: +1.50%")
+    
+    home_prob = max(0.05, min(0.95, home_prob))
+    
+    a_gpg = advanced_metrics.get(away, {}).get("runs_per_game", 4.5)
+    h_gpg = advanced_metrics.get(home, {}).get("runs_per_game", 4.5)
+    projected_total = round(a_gpg + h_gpg, 1)
+    
+    return home_prob, 1.0 - home_prob, projected_total, " | ".join(math_log)
+
 # --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAIL ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
@@ -520,24 +593,38 @@ def fetch_mlb_odds(odds_key):
 def get_today_existing_picks(sheet, today_date_str):
     rows = sheet.get_all_values()
     if len(rows) <= 1: return []
-    return [{"row_index": i, "date": r[0], "game": r[2], "status": r[10]} for i, r in enumerate(rows[1:], start=2) if r[0] == today_date_str and r[10] == "PENDING"]
+    try:
+        headers = [h.strip() for h in rows[0]]
+        date_col = headers.index("Date")
+        game_col = headers.index("Game")
+        status_col = headers.index("Status")
+        bet_type_col = headers.index("Bet Type / Sportsbook")
+    except ValueError:
+        # Fallback to absolute index if headers mismatch
+        return [{"row_index": i, "date": r[0], "game": r[2], "bet_type": r[3], "status": r[10]} for i, r in enumerate(rows[1:], start=2) if r[0] == today_date_str and r[10] == "PENDING"]
+
+    return [{"row_index": i, "date": r[date_col], "game": r[game_col], "bet_type": r[bet_type_col], "status": r[status_col]} 
+            for i, r in enumerate(rows[1:], start=2) if r[date_col] == today_date_str and r[status_col] == "PENDING"]
 
 def extract_canonical_teams_from_game(game_str):
     parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
     cleaned = [match_canonical_team(p) for p in parts if p.strip()]
     return tuple(sorted(cleaned))
 
-def game_already_pending(raw_rows, pick_date, game):
+def pick_already_pending(raw_rows, pick_date, game, bet_type):
     if len(raw_rows) <= 1: return False
     headers = [h.strip() for h in raw_rows[0]]
     try:
-        date_col, game_col, status_col = headers.index("Date"), headers.index("Game"), headers.index("Status")
+        date_col = headers.index("Date")
+        game_col = headers.index("Game")
+        status_col = headers.index("Status")
+        bet_type_col = headers.index("Bet Type / Sportsbook")
     except ValueError: return False
 
     norm_teams = extract_canonical_teams_from_game(game)
     for r in raw_rows[1:]:
-        if len(r) > max(date_col, game_col, status_col):
-            if str(r[date_col]).strip() == pick_date and extract_canonical_teams_from_game(r[game_col]) == norm_teams and str(r[status_col]).strip().upper() == "PENDING":
+        if len(r) > max(date_col, game_col, status_col, bet_type_col):
+            if str(r[date_col]).strip() == pick_date and extract_canonical_teams_from_game(r[game_col]) == norm_teams and str(r[status_col]).strip().upper() == "PENDING" and str(r[bet_type_col]).strip().lower() == bet_type.lower():
                 return True
     return False
 
@@ -558,7 +645,7 @@ def check_for_hallucinated_pitchers(game_str, reasoning_str, probable_pitchers):
         pass
     return True
 
-def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
+def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, advanced_metrics, memory):
     valid = []
     dropped_tbd = []
     dropped_live = []
@@ -587,11 +674,19 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
             dropped_tbd.append(f"{away} @ {home}")
             continue
             
+        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, objective_fatigue_ratings, advanced_metrics, memory)
+            
         game_copy = dict(game)
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
             "away": f"{away} | Starter: {a_pitcher} | Bullpen: {objective_fatigue_ratings.get(away, 'Fresh')}",
             "home": f"{home} | Starter: {h_pitcher} | Bullpen: {objective_fatigue_ratings.get(home, 'Fresh')}"
+        }
+        game_copy["python_math_baseline"] = {
+            "away_win_prob_baseline": f"{round(away_prob * 100, 1)}%",
+            "home_win_prob_baseline": f"{round(home_prob * 100, 1)}%",
+            "projected_total_runs": projected_total,
+            "calculation_log": math_log
         }
         valid.append(game_copy)
         
@@ -617,11 +712,11 @@ def parse_json_from_response(response):
     clean_text = raw_text.replace(f"{marker}json", "").replace(marker, "").strip()
     return json.loads(clean_text)
 
-def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_ratings, probable_pitchers):
+def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_ratings, probable_pitchers, advanced_metrics):
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
     
-    formatted_games = format_matchups(odds_data, probable_pitchers, fatigue_ratings)
+    formatted_games = format_matchups(odds_data, probable_pitchers, fatigue_ratings, advanced_metrics, memory)
     if not formatted_games: 
         print("WARNING: No valid pre-game matchups found.")
         return {"validations": [], "new_picks": []}
@@ -642,10 +737,11 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     1. FACTUAL PITCHERS: NEVER invent or swap starting pitchers.
     2. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, heavily penalize them.
     3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate schedule fatigue.
-    4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
+    4. MARKET SELECTION: You MUST evaluate all available markets provided in the data: Moneyline, Run Line (Spread), and Totals (Over/Under).
     5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
-    6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that calculates to an Expected Value (EV) of 11.0% or higher. There is NO CAP on the number of picks. If 10 games clear the 11.0% threshold, output all 10. If zero games clear it, output 0.
-    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
+    6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that organically calculates to an Expected Value (EV) of 11.0% or higher across any of the 3 markets. There is NO CAP on the number of picks.
+    7. NO ARTIFICIAL EV MANIPULATION: Calculate true Expected Value strictly as [(Model Prob * Decimal Odds) - 1]. DO NOT force or reverse-engineer the probability just to hit the 11% threshold. If a pick's true EV falls short, DO NOT pick it. Only pick games that organically reach >= 11.0% EV.
+    8. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -666,8 +762,8 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "date": "YYYY-MM-DD",
           "start_time": "YYYY-MM-DD HH:MM PM EDT",
           "game": "Away Team @ Home Team",
-          "bet_type": "Moneyline (FanDuel)",
-          "pick": "Team Name",
+          "bet_type": "Moneyline (FanDuel)" or "Run Line (DraftKings)" or "Total Over (Caesars)",
+          "pick": "Team Name" or "Team Name -1.5" or "Over 8.5",
           "odds": -110,
           "implied_prob": "52.4%",
           "model_prob": "58.0%",
@@ -724,6 +820,8 @@ def main():
     print(f"Fetched {len(probable_pitchers)} probable starting pitcher(s).")
     
     fatigue_data = fetch_recent_bullpen_usage(days_back=2)
+    advanced_metrics = fetch_team_advanced_metrics()
+    
     odds = fetch_mlb_odds(odds_key)
     print(f"Fetched {len(odds)} game(s) from The Odds API.")
     
@@ -732,7 +830,7 @@ def main():
         return
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
-    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
+    ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers, advanced_metrics)
     
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
@@ -773,6 +871,7 @@ def main():
 
     raw_rows = sheet.get_all_values()
     appended, skipped = 0, 0
+    existing_signatures = [f"{p['game']} | {p['bet_type']}" for p in open_picks]
     
     for p in new_picks:
         if not isinstance(p, dict):
@@ -787,11 +886,17 @@ def main():
         reasoning = str(p.get("reasoning", "")).strip()
         model_prob_str = str(p.get("model_prob", "50.0%"))
         
+        sig = f"{game} | {bet_type}"
+        if sig in existing_signatures:
+            print(f"  [Duplicate Blocked] Skipping {sig} (Already logged as PENDING).")
+            skipped += 1
+            continue
+        
         try: odds_val = float(p.get("odds", -110))
         except: odds_val = -110.0
 
-        if game_already_pending(raw_rows, pick_date, game):
-            print(f"Skipping duplicate game prediction: {game}")
+        if pick_already_pending(raw_rows, pick_date, game, bet_type):
+            print(f"Skipping duplicate prediction: {game} | {bet_type}")
             skipped += 1
             continue
             
@@ -808,6 +913,7 @@ def main():
             start_time_out
         ], value_input_option="USER_ENTERED")
         appended += 1
+        existing_signatures.append(sig)
             
     print(f"Execution complete! Added {appended} new pick(s). Skipped {skipped} duplicate(s)/hallucination(s).")
 
