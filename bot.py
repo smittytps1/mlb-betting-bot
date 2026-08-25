@@ -463,4 +463,155 @@ def parse_json_from_response(response):
             pass
             
     # Fallback cleanup
-    clean_text = raw_text.replace("```json", "").replace("
+    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(clean_text)
+    except Exception:
+        fallback_match = re.search(r'\{.*\}', clean_text, re.DOTALL)
+        if fallback_match:
+            return json.loads(fallback_match.group(0))
+        return {}
+
+def generate_picks_and_validations(formatted_games, open_picks, memory):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+    You are an elite Bounded Contextual Adjuster. Python has calculated strict baselines using active factor memory weights: {json.dumps(memory.get('reasoning_factor_weights', {}))}
+
+    === TODAY'S MATCHUPS & BASELINES ===
+    {json.dumps(formatted_games, indent=2)}
+
+    === ACTIVE PENDING PICKS TO RE-EVALUATE ===
+    {json.dumps(open_picks, indent=2)}
+
+    STRICT RULES:
+    1. THE TIGHT LEASH (±5.0% MAX): Adjust baselines by a maximum of ± 5.0%.
+    2. ANTI-HYPE & OBJECTIVITY: Disregard media hype. Base synthesis on hard data.
+    3. THE 11 PERCENT EV THRESHOLD: Recommend new picks where final `model_prob` gives an EV of 11.0% or higher.
+    4. MANDATORY VALIDATION: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if current odds/baselines still sustain an EV >= 11.0%. If yes, output action "VALIDATED". If no, output action "REJECTED".
+
+    OUTPUT SCHEMA (STRICT JSON):
+    {{
+      "validations": [
+        {{
+          "row_index": <int matching row_index in open_picks>,
+          "action": "VALIDATED" or "REJECTED",
+          "updated_odds": <int or float>,
+          "updated_model_prob": "58.0%",
+          "updated_expected_value": "+11.7%",
+          "reason": "<tight summary>"
+        }}
+      ],
+      "new_picks": [
+        {{
+          "date": "YYYY-MM-DD",
+          "start_time": "YYYY-MM-DD HH:MM PM EDT",
+          "game": "Away Team @ Home Team",
+          "bet_type": "Moneyline (FanDuel)",
+          "pick": "Team Name",
+          "odds": -110,
+          "implied_prob": "52.4%",
+          "model_prob": "55.0%",
+          "expected_value": "+11.7%",
+          "high_agreement": "Consensus",
+          "reasoning": "Data-driven explanation",
+          "ai_contextual_shift": "Shifted +X% because strict factual reason"
+        }}
+      ]
+    }}
+    """
+    for model_name in ["gemini-3.1-pro-preview", "gemini-3.7-flash"]:
+        for _ in range(2):
+            try:
+                response = client.models.generate_content(model=model_name, contents=prompt)
+                return parse_json_from_response(response)
+            except Exception: time.sleep(5)
+    return {"validations": [], "new_picks": []}
+
+# --- 7. MAIN EXECUTION ---
+def main():
+    spreadsheet, sheet = get_sheets()
+    ensure_headers(sheet)
+    ensure_evolution_sheet(spreadsheet)
+    odds_key = os.environ.get("ODDS_API_KEY")
+    auto_grade_pending_bets(sheet, odds_key)
+    update_scoreboard(spreadsheet)
+    
+    memory = load_memory()
+    today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
+    
+    probable_pitchers = fetch_today_probable_pitchers(today_date_str)
+    advanced_metrics = fetch_team_advanced_metrics()
+    fatigue_data = fetch_recent_bullpen_usage(days_back=2)
+    odds = fetch_mlb_odds(odds_key)
+    if not odds: return
+
+    formatted_games, matchup_cache = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory)
+    if not formatted_games: return
+
+    # Grab pending picks to re-evaluate (Validations)
+    open_picks_detailed = get_today_existing_picks_detailed(sheet, today_date_str)
+    
+    ai_response = generate_picks_and_validations(formatted_games, open_picks_detailed, memory)
+    
+    # Process Validations
+    validations = ai_response.get("validations", [])
+    if validations:
+        print(f"Processing {len(validations)} pick validation(s)...")
+        for val in validations:
+            row_idx = val.get("row_index")
+            action = str(val.get("action", "")).strip().upper()
+            reason = str(val.get("reason", "")).strip()
+            if row_idx and action in ["VALIDATED", "REJECTED"]:
+                sheet.update_cell(row_idx, 14, action) # Validation column
+                if action == "VALIDATED":
+                    if val.get("updated_odds"): sheet.update_cell(row_idx, 6, int(round(float(val["updated_odds"]))))
+                    if val.get("updated_model_prob"): sheet.update_cell(row_idx, 8, val["updated_model_prob"])
+                    if val.get("updated_expected_value"): sheet.update_cell(row_idx, 9, val["updated_expected_value"])
+                    if reason: sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                elif action == "REJECTED":
+                    sheet.update_cell(row_idx, 11, "REJECTED")
+                    sheet.update_cell(row_idx, 12, 0.0)
+                    if reason: sheet.update_cell(row_idx, 13, reason)
+                    sheet.update_cell(row_idx, 2, current_time_str)
+                print(f"  Row {row_idx} re-evaluated as: {action}")
+
+    # Process New Picks (with anti-duplication block)
+    new_picks = ai_response.get("new_picks", [])
+    appended = 0
+    existing_game_titles = [p["game"] for p in open_picks_detailed]
+    
+    for p in new_picks:
+        game = str(p.get("game", "")).strip()
+        if game in existing_game_titles:
+            print(f"  [Duplicate Blocked] Skipping {game} (Already logged as PENDING).")
+            continue
+
+        pick_date = str(p.get("date", today_date_str)).strip()
+        model_prob_str = str(p.get("model_prob", "50.0%"))
+        try: odds_val = float(p.get("odds", -110))
+        except: odds_val = -110.0
+
+        qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
+        cache_data = matchup_cache.get(game, {})
+
+        sheet.append_row([
+            pick_date, current_time_str, game, str(p.get("bet_type", "")).strip(), str(p.get("pick", "")).strip(), int(round(odds_val)),
+            p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
+            qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
+            str(p.get("start_time", "")).strip(),
+            cache_data.get("away_bp", "N/A"),           
+            cache_data.get("home_bp", "N/A"),           
+            cache_data.get("math", "N/A"),              
+            p.get("ai_contextual_shift", "")            
+        ], value_input_option="USER_ENTERED")
+        appended += 1
+        existing_game_titles.append(game)
+            
+    print(f"Execution complete! Validated existing picks and added {appended} new pick(s).")
+
+if __name__ == "__main__":
+    main()
