@@ -1,9 +1,9 @@
 {
-  "total_bets": 20,
-  "wins": 11,
-  "losses": 9,
-  "win_rate": "55.0%",
-  "net_profit_dollars": 15.76,
+  "total_bets": 25,
+  "wins": 13,
+  "losses": 12,
+  "win_rate": "52.0%",
+  "net_profit_dollars": -75.38,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -26,9 +26,9 @@
     },
     "platoon_and_lineup_splits": {
       "wins": 2,
-      "losses": 1,
-      "weight": 1.17,
-      "instruction": "High win rate (66.7%). Prioritize this factor."
+      "losses": 2,
+      "weight": 1.0,
+      "instruction": "Neutral performance (50.0%)."
     },
     "statcast_contact_quality": {
       "wins": 0,
@@ -49,10 +49,10 @@
       "instruction": "Baseline sample size."
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 6,
-      "losses": 5,
+      "wins": 8,
+      "losses": 8,
       "weight": 1.0,
-      "instruction": "Neutral performance (54.5%)."
+      "instruction": "Neutral performance (50.0%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
