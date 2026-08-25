@@ -488,7 +488,6 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
                 game_time_et = dt_et.strftime("%Y-%m-%d %I:%M %p EDT")
             except Exception: pass
 
-        # Strict Date Filter
         if game_date_et != today_date_str:
             continue
 
@@ -654,7 +653,7 @@ def main():
     open_picks_detailed = get_today_existing_picks_detailed(daily_sheet, today_date_str)
     ai_response = generate_daily_and_mlb_picks(formatted_games, open_picks_detailed, memory)
     
-    # Process Validations
+    # Process Validations with Rate-Limit Throttling (0.5s pause)
     validations = ai_response.get("validations", [])
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
@@ -677,6 +676,7 @@ def main():
                             sheet_obj.update_cell(row_idx, 12, 0.0)
                             if reason: sheet_obj.update_cell(row_idx, 13, reason)
                             sheet_obj.update_cell(row_idx, 2, current_time_str)
+                        time.sleep(0.5) # Rate-limit protection
                 except Exception: pass
 
     def write_picks_to_sheet(picks_list, target_sheet):
@@ -721,6 +721,7 @@ def main():
             ], value_input_option="USER_ENTERED")
             appended += 1
             existing_signatures.append(sig)
+            time.sleep(0.5) # Rate-limit protection
         return appended
 
     daily_picks = ai_response.get("daily_tab_picks", [])
