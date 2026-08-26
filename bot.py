@@ -128,10 +128,11 @@ def ensure_headers(sheet):
         headers = [
             "Date", "Pulled Time", "Game", "Bet Type / Sportsbook", "Pick", "Odds", 
             "Implied Prob (%)", "Model Prob (%)", "EV (%)", "Units", "Status", "P/L ($)", 
-            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time"
+            "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time", "Updated Reasoning"
         ]
-        if not existing or not existing[0] or existing[0][0] != "Date": 
-            sheet.insert_row(headers, index=1)
+        if not existing or not existing[0] or existing[0][0] != "Date" or len(existing[0]) < 17: 
+            # Update or insert headers if column 17 is missing
+            sheet.update(range_name='A1:Q1', values=[headers])
     except Exception: pass
 
 def ensure_evolution_sheet(spreadsheet):
@@ -740,7 +741,7 @@ def main():
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
     
-    # Process Validations with Strict In-Progress Game Protection (Zero updates to started games)
+    # Process Validations & Route Re-evaluation Notes to Column 17 (Leaving Column 13 Intouched!)
     validations = ai_response.get("validations", [])
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
@@ -759,27 +760,32 @@ def main():
                     
                     is_still_pregame = any(team in game_title for team in active_game_names)
                     
-                    # STRICT RULE: If the game is PENDING and has already started, skip it completely.
-                    # Do not touch reasoning, time, status, or any other cell for this row.
+                    # If game has started and is pending, skip updating or touching anything!
                     if current_status.upper() == "PENDING" and not is_still_pregame:
                         continue
 
-                    mlb_sheet.update_cell(row_idx, 14, action)
+                    mlb_sheet.update_cell(row_idx, 14, action) # Validation Status
                     if action == "VALIDATED":
                         if val.get("updated_odds"): mlb_sheet.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
                         if val.get("updated_model_prob"): mlb_sheet.update_cell(row_idx, 8, val.get("updated_model_prob"))
                         if val.get("updated_expected_value"): mlb_sheet.update_cell(row_idx, 9, val.get("updated_expected_value"))
-                        if reason: mlb_sheet.update_cell(row_idx, 13, reason)
+                        
+                        # ROUTE ANY RE-EVALUATION NOTES STRICTLY TO COLUMN 17 (Leaving Column 13 untouched!)
+                        if reason: mlb_sheet.update_cell(row_idx, 17, reason)
+                        
                         mlb_sheet.update_cell(row_idx, 2, current_time_str)
                     elif action == "REJECTED":
                         mlb_sheet.update_cell(row_idx, 11, "REJECTED")
                         mlb_sheet.update_cell(row_idx, 12, 0.0)
-                        if reason: mlb_sheet.update_cell(row_idx, 13, reason)
+                        
+                        # ROUTE REJECTION NOTES STRICTLY TO COLUMN 17
+                        if reason: mlb_sheet.update_cell(row_idx, 17, reason)
+                        
                         mlb_sheet.update_cell(row_idx, 2, current_time_str)
                     time.sleep(0.5)
             except Exception: pass
 
-    # Write new picks strictly to the 16 original columns of the MLB tab
+    # Write new picks (Original reasoning goes to Column 13; Column 17 is left blank initially)
     mlb_picks = ai_response.get("mlb_tab_picks", [])
     appended = 0
     existing_rows = mlb_sheet.get_all_values()
@@ -802,11 +808,12 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
         
+        # Appends 17 columns: Column 13 gets original reasoning, Column 17 starts blank for future notes
         mlb_sheet.append_row([
             pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
             qk_units, "PENDING", 0.0, str(p.get("reasoning", "")).strip(), "NEW", p.get("high_agreement", "No"),
-            str(p.get("start_time", "")).strip()
+            str(p.get("start_time", "")).strip(), ""
         ], value_input_option="USER_ENTERED")
         appended += 1
         existing_signatures.append(sig)
