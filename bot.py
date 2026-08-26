@@ -740,7 +740,7 @@ def main():
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
     
-    # Process Validations with In-Progress Game Protection & Rate-Limit Throttling
+    # Process Validations with Strict In-Progress Game Protection (Zero updates to started games)
     validations = ai_response.get("validations", [])
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
@@ -755,13 +755,13 @@ def main():
                 if row_idx:
                     row_vals = mlb_sheet.row_values(row_idx)
                     game_title = row_vals[2] if len(row_vals) > 2 else ""
+                    current_status = row_vals[10] if len(row_vals) > 10 else ""
                     
                     is_still_pregame = any(team in game_title for team in active_game_names)
-                    if not is_still_pregame:
-                        # Game has started: ONLY update Column 14 to VALIDATED. 
-                        # Do NOT touch Column 2 (Time), Column 13 (Reasoning), or any other cell!
-                        mlb_sheet.update_cell(row_idx, 14, "VALIDATED")
-                        time.sleep(0.5)
+                    
+                    # STRICT RULE: If the game is PENDING and has already started, skip it completely.
+                    # Do not touch reasoning, time, status, or any other cell for this row.
+                    if current_status.upper() == "PENDING" and not is_still_pregame:
                         continue
 
                     mlb_sheet.update_cell(row_idx, 14, action)
@@ -795,6 +795,7 @@ def main():
         sig = f"{game} | {bet_type_label}"
         if sig in existing_signatures: continue
 
+--------
         pick_date = str(p.get("date", today_date_str)).strip()
         model_prob_str = str(p.get("model_prob", "50.0%"))
         try: odds_val = float(p.get("odds", -110))
