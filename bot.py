@@ -426,7 +426,7 @@ def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigu
     sp_shift_raw = ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.02 * whip_weight
     sp_shift = max(-0.10, min(0.10, sp_shift_raw))
     home_prob += sp_shift
-    math_log.append(f"SP WHIP Shift ({a_sp_stats['whip']} vs {h_sp_stats['whip']}): {round(sp_shift*100, 2)}%")
+    math_log.append(f"SP WHIP ({a_sp_stats['whip']} vs {h_sp_stats['whip']}) | Shift: {round(sp_shift*100, 2)}%")
 
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
@@ -673,7 +673,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
        Actively look for mispriced favorites and high-value run lines where market inefficiencies appear, rather than solely picking underdogs.
     5. MAX-EV SIDE SELECTION: If multiple markets for the same game clear their EV thresholds, you MUST ONLY output the ONE market with the HIGHEST EV.
     6. SMART VALIDATION FOR IN-PROGRESS GAMES: For each item in 'ACTIVE PENDING PICKS TO RE-EVALUATE', check if pre-game odds are still available. If a game has already started and odds are gone, DO NOT touch or reject it. Output action "VALIDATED" to keep it as PENDING.
-    7. HYBRID REASONING REQUIREMENT: In the 'reasoning' field of every pick, you MUST blend the exact 6-metric math breakdown (SP WHIP, OPS, ISO, Bullpen Load, Schedule Fatigue, HFA) with a compelling narrative synthesis explaining *why* the market mispriced the line and how past learnings inform the pick. NEVER invent or exaggerate bullpen pitch counts; adhere strictly to realistic baseball pitch totals and the objective load indexes provided.
+    7. HYBRID REASONING REQUIREMENT: In the 'reasoning' field of every pick, go straight into the metrics and narrative without any introductory filler phrase like "Hybrid narrative and math breakdown: 6-metric baseline...". Blend the exact 6-metric math breakdown with a compelling narrative synthesis explaining why the market mispriced the line. Never invent or exaggerate bullpen pitch counts; adhere strictly to realistic baseball pitch totals and the objective load indexes provided.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -699,7 +699,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "Hybrid narrative and math breakdown: 6-metric baseline (SP WHIP [val], OPS [val], ISO [val], Bullpen [val], Schedule [val], HFA +1.5%) combined with narrative synthesis on market inefficiency.",
+          "reasoning": "6-metric baseline (SP WHIP [val], OPS [val], ISO [val], Bullpen [val], Schedule [val], HFA +1.5%) combined with narrative synthesis on market inefficiency.",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
