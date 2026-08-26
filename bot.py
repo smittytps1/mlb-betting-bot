@@ -131,7 +131,6 @@ def ensure_headers(sheet):
             "Reasoning", "Validation", "High Agreement & Source Breakdown", "Game Start Time", "Updated Reasoning"
         ]
         if not existing or not existing[0] or existing[0][0] != "Date" or len(existing[0]) < 17: 
-            # Update or insert headers if column 17 is missing
             sheet.update(range_name='A1:Q1', values=[headers])
     except Exception: pass
 
@@ -208,24 +207,32 @@ def fetch_team_advanced_metrics():
 
 def fetch_pitcher_season_stats(pitcher_name):
     headers = {"User-Agent": "Mozilla/5.0"}
+    if not pitcher_name or pitcher_name.upper() == "TBD":
+        return {"whip": 1.30, "era": 4.00}
+    
     try:
-        search_url = f"https://statsapi.mlb.com/api/v1/people/search?names={pitcher_name}&sportIds=1"
+        clean_name = pitcher_name.strip()
+        search_url = f"https://statsapi.mlb.com/api/v1/people/search?names={clean_name}&sportIds=1"
         search_resp = requests.get(search_url, headers=headers, timeout=5)
+        
         if search_resp.status_code == 200:
             people = search_resp.json().get("people", [])
             if people:
                 pid = people[0].get("id")
                 stat_url = f"https://statsapi.mlb.com/api/v1/people/{pid}/stats?stats=season&group=pitching"
                 stat_resp = requests.get(stat_url, headers=headers, timeout=5)
+                
                 if stat_resp.status_code == 200:
-                    splits = stat_resp.json().get("stats", [])[0].get("splits", [])
-                    if splits:
-                        p_stats = splits[0].get("stat", {})
+                    stats_data = stat_resp.json().get("stats", [])
+                    if stats_data and stats_data[0].get("splits"):
+                        p_stats = stats_data[0].get("splits")[0].get("stat", {})
                         return {
                             "whip": float(p_stats.get("whip", 1.30)),
                             "era": float(p_stats.get("era", 4.00))
                         }
-    except Exception: pass
+    except Exception as e:
+        print(f"Notice: Could not fetch stats for pitcher '{pitcher_name}': {e}")
+        
     return {"whip": 1.30, "era": 4.00}
 
 def fetch_today_probable_pitchers(target_date_str):
@@ -760,17 +767,16 @@ def main():
                     
                     is_still_pregame = any(team in game_title for team in active_game_names)
                     
-                    # If game has started and is pending, skip updating or touching anything!
                     if current_status.upper() == "PENDING" and not is_still_pregame:
                         continue
 
-                    mlb_sheet.update_cell(row_idx, 14, action) # Validation Status
+                    mlb_sheet.update_cell(row_idx, 14, action)
                     if action == "VALIDATED":
                         if val.get("updated_odds"): mlb_sheet.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
                         if val.get("updated_model_prob"): mlb_sheet.update_cell(row_idx, 8, val.get("updated_model_prob"))
                         if val.get("updated_expected_value"): mlb_sheet.update_cell(row_idx, 9, val.get("updated_expected_value"))
                         
-                        # ROUTE ANY RE-EVALUATION NOTES STRICTLY TO COLUMN 17 (Leaving Column 13 untouched!)
+                        # ROUTE RE-EVALUATION NOTES STRICTLY TO COLUMN 17 (Leaving Column 13 untouched!)
                         if reason: mlb_sheet.update_cell(row_idx, 17, reason)
                         
                         mlb_sheet.update_cell(row_idx, 2, current_time_str)
@@ -808,7 +814,6 @@ def main():
 
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
         
-        # Appends 17 columns: Column 13 gets original reasoning, Column 17 starts blank for future notes
         mlb_sheet.append_row([
             pick_date, current_time_str, game, bet_type_label, str(p.get("pick", "")).strip(), int(round(odds_val)),
             p.get("implied_prob", ""), model_prob_str, p.get("expected_value", ""),
