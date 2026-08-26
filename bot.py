@@ -205,55 +205,60 @@ def fetch_team_advanced_metrics():
     except Exception: pass
     return metrics_map
 
-def fetch_pitcher_season_stats(pitcher_name):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    if not pitcher_name or pitcher_name.upper() == "TBD":
-        return {"whip": 1.30, "era": 4.00}
-    
-    try:
-        clean_name = pitcher_name.strip()
-        search_url = f"https://statsapi.mlb.com/api/v1/people/search?names={clean_name}&sportIds=1"
-        search_resp = requests.get(search_url, headers=headers, timeout=5)
-        
-        if search_resp.status_code == 200:
-            people = search_resp.json().get("people", [])
-            if people:
-                pid = people[0].get("id")
-                stat_url = f"https://statsapi.mlb.com/api/v1/people/{pid}/stats?stats=season&group=pitching"
-                stat_resp = requests.get(stat_url, headers=headers, timeout=5)
-                
-                if stat_resp.status_code == 200:
-                    stats_data = stat_resp.json().get("stats", [])
-                    if stats_data and stats_data[0].get("splits"):
-                        p_stats = stats_data[0].get("splits")[0].get("stat", {})
-                        return {
-                            "whip": float(p_stats.get("whip", 1.30)),
-                            "era": float(p_stats.get("era", 4.00))
-                        }
-    except Exception as e:
-        print(f"Notice: Could not fetch stats for pitcher '{pitcher_name}': {e}")
-        
-    return {"whip": 1.30, "era": 4.00}
-
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        espn_resp = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={target_date_str.replace('-', '')}", headers=headers, timeout=10)
-        if espn_resp.status_code == 200:
-            for event in espn_resp.json().get("events", []):
-                comps = event.get("competitions", [])
-                if not comps: continue
-                competitors = comps[0].get("competitors", [])
-                for p in comps[0].get("probables", []):
-                    p_name = p.get("athlete", {}).get("displayName", "TBD")
-                    team_id = p.get("team", {}).get("id")
-                    for c in competitors:
-                        if c.get("id") == team_id or c.get("team", {}).get("id") == team_id:
-                            team_name = match_canonical_team(c.get("team", {}).get("displayName", ""))
-                            if team_name: pitcher_map[team_name] = p_name
-    except Exception: pass
+        # Hydrate probablePitcher directly from MLB schedule to capture official player IDs
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher"
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            dates = resp.json().get("dates", [])
+            if dates:
+                for game in dates[0].get("games", []):
+                    for side in ["away", "home"]:
+                        team_data = game.get("teams", {}).get(side, {})
+                        team_name = match_canonical_team(team_data.get("team", {}).get("name", ""))
+                        
+                        pitcher_data = team_data.get("probablePitcher", {})
+                        if pitcher_data and team_name:
+                            pitcher_map[team_name] = {
+                                "id": pitcher_data.get("id"),
+                                "name": pitcher_data.get("fullName", "TBD")
+                            }
+    except Exception as e:
+        print(f"Notice: Failed to fetch hydrated probable pitchers: {e}")
+        
     return pitcher_map
+
+def fetch_pitcher_season_stats(pitcher_info):
+    default_stats = {"whip": 1.30, "era": 4.00}
+    
+    if not isinstance(pitcher_info, dict) or not pitcher_info.get("id"):
+        return default_stats
+        
+    headers = {"User-Agent": "Mozilla/5.0"}
+    pid = pitcher_info.get("id")
+    pitcher_name = pitcher_info.get("name", "Unknown")
+    
+    try:
+        # Look up stats directly using the verified MLB Player ID
+        stat_url = f"https://statsapi.mlb.com/api/v1/people/{pid}/stats?stats=season&group=pitching"
+        stat_resp = requests.get(stat_url, headers=headers, timeout=5)
+        
+        if stat_resp.status_code == 200:
+            stats_data = stat_resp.json().get("stats", [])
+            if stats_data and stats_data[0].get("splits"):
+                p_stats = stats_data[0].get("splits")[0].get("stat", {})
+                return {
+                    "whip": float(p_stats.get("whip", 1.30)),
+                    "era": float(p_stats.get("era", 4.00))
+                }
+    except Exception as e:
+        print(f"Notice: Could not fetch stats for pitcher '{pitcher_name}' (ID: {pid}): {e}")
+        
+    return default_stats
 
 def get_mlb_teams_map():
     url = "https://statsapi.mlb.com/api/v1/teams?sportId=1"
@@ -412,7 +417,7 @@ def update_memory_from_sheet(sheet, memory):
     return memory
 
 # --- 4. THE 6-METRIC BASELINE MATH ENGINE ---
-def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigue_data, advanced_metrics, memory):
+def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigue_data, advanced_metrics, memory):
     home_prob = 0.50 
     math_log = []
     weights = memory.get("reasoning_factor_weights", {})
@@ -421,12 +426,16 @@ def calculate_strict_baseline(away, home, a_pitcher_name, h_pitcher_name, fatigu
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
     
-    a_sp_stats = fetch_pitcher_season_stats(a_pitcher_name)
-    h_sp_stats = fetch_pitcher_season_stats(h_pitcher_name)
+    a_sp_stats = fetch_pitcher_season_stats(a_pitcher_info)
+    h_sp_stats = fetch_pitcher_season_stats(h_pitcher_info)
+    
+    a_name_str = a_pitcher_info.get("name", "TBD") if isinstance(a_pitcher_info, dict) else str(a_pitcher_info)
+    h_name_str = h_pitcher_info.get("name", "TBD") if isinstance(h_pitcher_info, dict) else str(h_pitcher_info)
+
     sp_shift_raw = ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.02 * whip_weight
     sp_shift = max(-0.10, min(0.10, sp_shift_raw))
     home_prob += sp_shift
-    math_log.append(f"SP WHIP ({a_sp_stats['whip']} vs {h_sp_stats['whip']}) | Shift: {round(sp_shift*100, 2)}%")
+    math_log.append(f"SP WHIP ({a_name_str}: {a_sp_stats['whip']} vs {h_name_str}: {h_sp_stats['whip']}) | Shift: {round(sp_shift*100, 2)}%")
 
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
@@ -591,10 +600,13 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         if game_date_et != today_date_str:
             continue
 
-        h_pitcher = probable_pitchers.get(home, "TBD")
-        a_pitcher = probable_pitchers.get(away, "TBD")
+        h_pitcher_info = probable_pitchers.get(home, {"name": "TBD", "id": None})
+        a_pitcher_info = probable_pitchers.get(away, {"name": "TBD", "id": None})
         
-        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher, h_pitcher, objective_fatigue_ratings, advanced_metrics, memory)
+        h_pitcher_name = h_pitcher_info.get("name", "TBD") if isinstance(h_pitcher_info, dict) else str(h_pitcher_info)
+        a_pitcher_name = a_pitcher_info.get("name", "TBD") if isinstance(a_pitcher_info, dict) else str(a_pitcher_info)
+        
+        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, objective_fatigue_ratings, advanced_metrics, memory)
         
         lam_home = projected_total * home_prob
         lam_away = projected_total * away_prob
@@ -614,8 +626,8 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         game_copy = dict(game)
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
-            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {away_bp_str} | OPS: {advanced_metrics.get(away, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(away, {}).get('whip', 1.30)}",
-            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {home_bp_str} | OPS: {advanced_metrics.get(home, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(home, {}).get('whip', 1.30)}"
+            "away": f"{away} | Starter: {a_pitcher_name} | Bullpen: {away_bp_str} | OPS: {advanced_metrics.get(away, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(away, {}).get('whip', 1.30)}",
+            "home": f"{home} | Starter: {h_pitcher_name} | Bullpen: {home_bp_str} | OPS: {advanced_metrics.get(home, {}).get('ops', 0.720)} | WHIP: {advanced_metrics.get(home, {}).get('whip', 1.30)}"
         }
         game_copy["python_math_baseline"] = {
             "away_win_prob_baseline": f"{round(away_prob * 100, 1)}%",
@@ -699,7 +711,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "6-metric baseline (SP WHIP [val], OPS [val], ISO [val], Bullpen [val], Schedule [val], HFA +1.5%) combined with narrative synthesis on market inefficiency.",
+          "reasoning": "SP WHIP [away_pitcher: val vs home_pitcher: val], OPS Shift [val], ISO Shift [val], Bullpen Load [val], Schedule [val], HFA +1.5%. Followed by concise narrative on why the line is mispriced.",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
@@ -748,7 +760,7 @@ def main():
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
     
-    # Process Validations & Route Re-evaluation Notes to Column 17 (Leaving Column 13 Intouched!)
+    # Process Validations & Route Re-evaluation Notes to Column 17 (Leaving Column 13 Untouched!)
     validations = ai_response.get("validations", [])
     if validations:
         print(f"Processing {len(validations)} pick validation(s)...")
@@ -776,7 +788,7 @@ def main():
                         if val.get("updated_model_prob"): mlb_sheet.update_cell(row_idx, 8, val.get("updated_model_prob"))
                         if val.get("updated_expected_value"): mlb_sheet.update_cell(row_idx, 9, val.get("updated_expected_value"))
                         
-                        # ROUTE RE-EVALUATION NOTES STRICTLY TO COLUMN 17 (Leaving Column 13 untouched!)
+                        # ROUTE RE-EVALUATION NOTES STRICTLY TO COLUMN 17
                         if reason: mlb_sheet.update_cell(row_idx, 17, reason)
                         
                         mlb_sheet.update_cell(row_idx, 2, current_time_str)
