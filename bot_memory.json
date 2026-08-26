@@ -1,9 +1,9 @@
 {
-  "total_bets": 33,
+  "total_bets": 34,
   "wins": 17,
-  "losses": 16,
-  "win_rate": "51.5%",
-  "net_profit_dollars": -39.98,
+  "losses": 17,
+  "win_rate": "50.0%",
+  "net_profit_dollars": -145.98,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -20,15 +20,15 @@
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 8,
-      "losses": 10,
+      "losses": 11,
       "weight": 1.0,
-      "instruction": "Neutral performance (44.4%)."
+      "instruction": "Neutral performance (42.1%)."
     },
     "platoon_and_lineup_splits": {
       "wins": 5,
-      "losses": 6,
+      "losses": 7,
       "weight": 1.0,
-      "instruction": "Neutral performance (45.5%)."
+      "instruction": "Neutral performance (41.7%)."
     },
     "statcast_contact_quality": {
       "wins": 0,
@@ -50,9 +50,9 @@
     },
     "bullpen_depth_and_fatigue": {
       "wins": 13,
-      "losses": 13,
+      "losses": 14,
       "weight": 1.0,
-      "instruction": "Neutral performance (50.0%)."
+      "instruction": "Neutral performance (48.1%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
