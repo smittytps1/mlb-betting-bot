@@ -758,7 +758,8 @@ def main():
                     
                     is_still_pregame = any(team in game_title for team in active_game_names)
                     if not is_still_pregame:
-                        # Game has started; protect completely and do not touch the reasoning cell!
+                        # Game has started: ONLY update Column 14 to VALIDATED. 
+                        # Do NOT touch Column 2 (Time), Column 13 (Reasoning), or any other cell!
                         mlb_sheet.update_cell(row_idx, 14, "VALIDATED")
                         time.sleep(0.5)
                         continue
