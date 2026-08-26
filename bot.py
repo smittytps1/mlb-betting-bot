@@ -326,8 +326,9 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
         total_p = stats["total_pitches"]
         apps = stats["appearances"]
         sched_games = stats["schedule_games_7d"]
-        days_played = max(1.0, float(len(stats["bp_dates"])))
-        load = round(float(total_p) / days_played, 1) if total_p > 0 else 0.0
+        
+        # FIX: Always divide by the strict 2-day window to correctly calculate off-day rest
+        load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
         
         if load >= 45.0 or len(stats["bp_dates"]) >= 2: status = "TAXED"
         elif load >= 20.0: status = "MODERATELY WORKED"
@@ -711,7 +712,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
           "model_prob": "55.0%",
           "expected_value": "+13.2%",
           "high_agreement": "Consensus",
-          "reasoning": "SP WHIP [away_pitcher: val vs home_pitcher: val], OPS Shift [val], ISO Shift [val], Bullpen Load [val], Schedule [val], HFA +1.5%. Followed by concise narrative on why the line is mispriced.",
+          "reasoning": "6-metric baseline (SP WHIP [away_pitcher: val vs home_pitcher: val], OPS Shift [val], ISO Shift [val], Bullpen Load [val], Schedule [val], HFA +1.5%). Followed by concise narrative on why the line is mispriced.",
           "ai_contextual_shift": "Shifted +X%"
         }}
       ]
