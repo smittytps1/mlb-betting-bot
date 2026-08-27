@@ -1,0 +1,38 @@
+name: MLB OG Predictor Bot
+
+on:
+  schedule:
+    # Runs at 11:00 AM UTC (7:00 AM EDT) and 4:00 PM UTC (12:00 PM EDT) daily
+    - cron: '0 11,16 * * *'
+  workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
+
+jobs:
+  run-og-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests gspread google-genai google-auth
+
+      - name: Run OG Predictor
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python og_predictor.py
+
+      - name: Commit and push updated memory
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add og_memory.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update OG Predictor memory" && git push)
