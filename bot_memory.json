@@ -22,13 +22,13 @@
       "wins": 10,
       "losses": 15,
       "weight": 0.88,
-      "instruction": "Cold streak (40.0%)."
+      "instruction": "Cold streak (40.0%). Dampening shift."
     },
     "platoon_and_lineup_splits": {
       "wins": 7,
       "losses": 9,
       "weight": 0.93,
-      "instruction": "Cold streak (43.8%)."
+      "instruction": "Cold streak (43.8%). Dampening shift."
     },
     "statcast_contact_quality": {
       "wins": 0,
