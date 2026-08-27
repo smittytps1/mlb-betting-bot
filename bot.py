@@ -111,7 +111,6 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         if kelly <= 0: return 0.5
         raw_units = (kelly * 0.25) * 40.0
         
-        # Sizing Dampener: Cap favorites/near-evens at 1.15u, allow plus-money dogs up to 1.50u
         if odds_val < 100:
             return max(0.5, min(1.15, round(raw_units, 2)))
         else:
@@ -269,12 +268,69 @@ def get_mlb_teams_map():
         for t in resp.json().get("teams", []): teams[t["id"]] = match_canonical_team(t["name"])
     return teams
 
+def fetch_high_leverage_relievers(teams_map):
+    current_year = datetime.now(ZoneInfo("America/New_York")).year
+    headers = {"User-Agent": "Mozilla/5.0"}
+    leverage_weights = {}
+
+    for team_id in teams_map.keys():
+        try:
+            url = f"https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerPool=all&season={current_year}&teamId={team_id}&gameType=R"
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code != 200:
+                continue
+                
+            stats_list = resp.json().get("stats", [])
+            if not stats_list:
+                continue
+
+            relievers = []
+            for split in stats_list[0].get("splits", []):
+                pid = split.get("player", {}).get("id")
+                stat = split.get("stat", {})
+                games = int(stat.get("gamesPitched", 0))
+                games_started = int(stat.get("gamesStarted", 0))
+
+                # Isolate relievers from starters
+                if games > 0 and (games - games_started) >= 5:
+                    relievers.append({
+                        "id": pid,
+                        "saves": int(stat.get("saves", 0)),
+                        "holds": int(stat.get("holds", 0)),
+                        "games_finished": int(stat.get("gamesFinished", 0))
+                    })
+
+            if not relievers:
+                continue
+
+            # Identify Closer (Top save producer, tiebreaker games finished)
+            relievers_by_saves = sorted(relievers, key=lambda x: (x["saves"], x["games_finished"]), reverse=True)
+            primary_closer = relievers_by_saves[0]
+            if primary_closer["saves"] >= 2 or primary_closer["games_finished"] >= 5:
+                leverage_weights[primary_closer["id"]] = 2.0
+
+            # Identify Setup Men (Next top 2 hold producers)
+            remaining_relievers = [r for r in relievers if r["id"] != primary_closer["id"]]
+            relievers_by_holds = sorted(remaining_relievers, key=lambda x: x["holds"], reverse=True)
+            
+            for setup_man in relievers_by_holds[:2]:
+                if setup_man["holds"] >= 2:
+                    leverage_weights[setup_man["id"]] = 1.5
+
+        except Exception:
+            continue
+
+    return leverage_weights
+
 def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     teams_map = get_mlb_teams_map()
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
-    team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0} for name in teams_map.values()}
+    team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0, "high_lev_used": False} for name in teams_map.values()}
     
+    # Map out the dynamic hierarchy of high-leverage arms
+    leverage_weights = fetch_high_leverage_relievers(teams_map)
+
     for d in range(1, days_back_schedule + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
         schedule_resp = requests.get(f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}", headers=headers, timeout=10)
@@ -300,12 +356,21 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                     if not canonical: continue
                     pitchers = team_box.get("pitchers", [])
                     players = team_box.get("players", {})
+                    
                     if len(pitchers) > 1:
                         relief_pitcher_ids = pitchers[1:]
                         game_relief_pitches = 0
                         for pid in relief_pitcher_ids:
                             p_stats = players.get(f"ID{pid}", {}).get("stats", {}).get("pitching", {})
-                            game_relief_pitches += int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
+                            raw_pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
+                            
+                            # Apply dynamic tier multiplier
+                            weight = leverage_weights.get(pid, 1.0)
+                            game_relief_pitches += (raw_pitches * weight)
+                            
+                            if weight >= 1.5:
+                                team_stats[canonical]["high_lev_used"] = True
+                                
                         if game_relief_pitches > 0:
                             team_stats[canonical]["total_pitches"] += game_relief_pitches
                             team_stats[canonical]["bp_dates"].add(target_date)
@@ -315,11 +380,19 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     for team, stats in team_stats.items():
         total_p = stats["total_pitches"]
         load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
-        status = "TAXED" if load >= 45.0 or len(stats["bp_dates"]) >= 2 else "MODERATELY WORKED" if load >= 20.0 else "FRESH"
+        
+        # New robust thresholds to accommodate 1.5x/2.0x multipliers
+        if load >= 90.0:
+            status = "TAXED"
+        elif load >= 65.0:
+            status = "MODERATELY WORKED"
+        else:
+            status = "FRESH"
+            
         objective_ratings[team] = {
-            "status_string": f"Status: {status} | Load Index: {load} | Relief Apps: {stats['appearances']} | Total Pitches (2 Days): {total_p} | Games Played (Last 7 Days): {stats['schedule_games_7d']}",
+            "status_string": f"Status: {status} | Load Index: {load} | Relief Apps: {stats['appearances']} | Weighted Pitches (2 Days): {total_p} | Games Played (Last 7 Days): {stats['schedule_games_7d']}",
             "load": load,
-            "closer_b2b": len(stats["bp_dates"]) >= 2
+            "closer_b2b": stats["high_lev_used"] and len(stats["bp_dates"]) >= 2
         }
     return objective_ratings
 
