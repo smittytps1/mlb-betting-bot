@@ -111,6 +111,7 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         if kelly <= 0: return 0.5
         raw_units = (kelly * 0.25) * 40.0
         
+        # Sizing Dampener: Cap favorites/near-evens at 1.15u, allow plus-money dogs up to 1.50u
         if odds_val < 100:
             return max(0.5, min(1.15, round(raw_units, 2)))
         else:
@@ -242,7 +243,10 @@ def fetch_today_probable_pitchers(target_date_str):
                         team_name = match_canonical_team(team_data.get("team", {}).get("name", ""))
                         pitcher_data = team_data.get("probablePitcher", {})
                         if pitcher_data and team_name:
-                            pitcher_map[team_name] = {"id": pitcher_data.get("id"), "name": pitcher_data.get("fullName", "TBD")}
+                            p_name = pitcher_data.get("fullName", "TBD")
+                            p_id = pitcher_data.get("id")
+                            if p_name and p_name != "TBD" and p_id:
+                                pitcher_map[team_name] = {"id": p_id, "name": p_name}
     except Exception: pass
     return pitcher_map
 
@@ -277,12 +281,9 @@ def fetch_high_leverage_relievers(teams_map):
         try:
             url = f"https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerPool=all&season={current_year}&teamId={team_id}&gameType=R"
             resp = requests.get(url, headers=headers, timeout=5)
-            if resp.status_code != 200:
-                continue
-                
+            if resp.status_code != 200: continue
             stats_list = resp.json().get("stats", [])
-            if not stats_list:
-                continue
+            if not stats_list: continue
 
             relievers = []
             for split in stats_list[0].get("splits", []):
@@ -291,7 +292,6 @@ def fetch_high_leverage_relievers(teams_map):
                 games = int(stat.get("gamesPitched", 0))
                 games_started = int(stat.get("gamesStarted", 0))
 
-                # Isolate relievers from starters
                 if games > 0 and (games - games_started) >= 5:
                     relievers.append({
                         "id": pid,
@@ -300,26 +300,22 @@ def fetch_high_leverage_relievers(teams_map):
                         "games_finished": int(stat.get("gamesFinished", 0))
                     })
 
-            if not relievers:
-                continue
+            if not relievers: continue
 
-            # Identify Closer (Top save producer, tiebreaker games finished)
+            # Closer: 2.0x
             relievers_by_saves = sorted(relievers, key=lambda x: (x["saves"], x["games_finished"]), reverse=True)
             primary_closer = relievers_by_saves[0]
             if primary_closer["saves"] >= 2 or primary_closer["games_finished"] >= 5:
                 leverage_weights[primary_closer["id"]] = 2.0
 
-            # Identify Setup Men (Next top 2 hold producers)
-            remaining_relievers = [r for r in relievers if r["id"] != primary_closer["id"]]
-            relievers_by_holds = sorted(remaining_relievers, key=lambda x: x["holds"], reverse=True)
-            
+            # Top 2 Setup Men: 1.5x
+            remaining = [r for r in relievers if r["id"] != primary_closer["id"]]
+            relievers_by_holds = sorted(remaining, key=lambda x: x["holds"], reverse=True)
             for setup_man in relievers_by_holds[:2]:
                 if setup_man["holds"] >= 2:
                     leverage_weights[setup_man["id"]] = 1.5
-
         except Exception:
             continue
-
     return leverage_weights
 
 def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
@@ -328,7 +324,6 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     headers = {"User-Agent": "Mozilla/5.0"}
     team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0, "high_lev_used": False} for name in teams_map.values()}
     
-    # Map out the dynamic hierarchy of high-leverage arms
     leverage_weights = fetch_high_leverage_relievers(teams_map)
 
     for d in range(1, days_back_schedule + 1):
@@ -364,10 +359,8 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                             p_stats = players.get(f"ID{pid}", {}).get("stats", {}).get("pitching", {})
                             raw_pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
                             
-                            # Apply dynamic tier multiplier
                             weight = leverage_weights.get(pid, 1.0)
                             game_relief_pitches += (raw_pitches * weight)
-                            
                             if weight >= 1.5:
                                 team_stats[canonical]["high_lev_used"] = True
                                 
@@ -381,7 +374,6 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
         total_p = stats["total_pitches"]
         load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
         
-        # New robust thresholds to accommodate 1.5x/2.0x multipliers
         if load >= 90.0:
             status = "TAXED"
         elif load >= 65.0:
@@ -396,19 +388,28 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
         }
     return objective_ratings
 
+# --- SELF-LEARNING DYNAMIC MEMORY ENGINE ---
 def load_memory():
     if os.path.exists("bot_memory.json"):
         try:
             with open("bot_memory.json", "r") as f: return json.load(f)
         except Exception: pass
-    return {"total_bets": 0, "wins": 0, "losses": 0, "reasoning_factor_weights": {"starting_pitcher_expected_metrics": {"weight": 1.0}, "platoon_and_lineup_splits": {"weight": 1.0}, "bullpen_depth_and_fatigue": {"weight": 1.0}}}
+    return {
+        "total_bets": 0, "wins": 0, "losses": 0,
+        "reasoning_factor_weights": {
+            "starting_pitcher_expected_metrics": {"weight": 1.0},
+            "platoon_and_lineup_splits": {"weight": 1.0},
+            "bullpen_depth_and_fatigue": {"weight": 1.0}
+        }
+    }
 
 def calculate_factor_weight(wins, losses):
     total = wins + losses
     if total < 3: return 1.0, "Baseline sample size."
     win_rate = wins / total
-    if win_rate >= 0.55: return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%)."
-    elif win_rate <= 0.45: return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%)."
+    # Dynamically scales shift influence between 0.3x and 1.5x
+    if win_rate >= 0.55: return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritizing shift."
+    elif win_rate <= 0.45: return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). Dampening shift."
     else: return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%)."
 
 def update_memory_from_sheet(sheet, memory):
@@ -462,50 +463,57 @@ def update_memory_from_sheet(sheet, memory):
     except Exception: pass
     return memory
 
+# --- 6-METRIC BASELINE MATH ENGINE WITH DYNAMIC LEARNING WEIGHTS ---
 def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigue_data, advanced_metrics, memory):
     home_prob = 0.50 
     math_log = []
     weights = memory.get("reasoning_factor_weights", {})
+    
     bp_weight = weights.get("bullpen_depth_and_fatigue", {}).get("weight", 1.0)
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
     
     a_sp_stats = fetch_pitcher_season_stats(a_pitcher_info)
     h_sp_stats = fetch_pitcher_season_stats(h_pitcher_info)
-    a_name_str = a_pitcher_info.get("name", "TBD") if isinstance(a_pitcher_info, dict) else str(a_pitcher_info)
-    h_name_str = h_pitcher_info.get("name", "TBD") if isinstance(h_pitcher_info, dict) else str(h_pitcher_info)
+    a_name_str = a_pitcher_info.get("name", "TBD")
+    h_name_str = h_pitcher_info.get("name", "TBD")
 
-    sp_shift = max(-0.10, min(0.10, ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.02 * whip_weight))
+    # Dynamic SP WHIP Shift scaled by self-learning weight
+    sp_shift = ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.02 * whip_weight
     home_prob += sp_shift
-    math_log.append(f"SP WHIP ({a_name_str}: {a_sp_stats['whip']} vs {h_name_str}: {h_sp_stats['whip']}) | Shift: {round(sp_shift*100, 2)}%")
+    math_log.append(f"SP WHIP ({a_name_str}: {a_sp_stats['whip']} vs {h_name_str}: {h_sp_stats['whip']} | Weight {whip_weight}x) -> Shift: {round(sp_shift*100, 2)}%")
 
+    # Dynamic Lineup OPS Shift scaled by self-learning weight
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
-    ops_shift = max(-0.08, min(0.08, ((h_ops - a_ops) / 0.050) * 0.015 * ops_weight))
+    ops_shift = ((h_ops - a_ops) / 0.050) * 0.015 * ops_weight
     home_prob += ops_shift
-    math_log.append(f"OPS Shift ({a_ops} vs {h_ops}): {round(ops_shift*100, 2)}%")
+    math_log.append(f"OPS Shift ({a_ops} vs {h_ops} | Weight {ops_weight}x) -> Shift: {round(ops_shift*100, 2)}%")
 
+    # Contact Quality ISO Shift
     a_iso = advanced_metrics.get(away, {}).get("iso", 0.150)
     h_iso = advanced_metrics.get(home, {}).get("iso", 0.150)
-    iso_shift = max(-0.05, min(0.05, ((h_iso - a_iso) / 0.020) * 0.01))
+    iso_shift = ((h_iso - a_iso) / 0.020) * 0.01
     home_prob += iso_shift
-    math_log.append(f"Contact Quality ISO Shift: {round(iso_shift*100, 2)}%")
+    math_log.append(f"ISO Shift: {round(iso_shift*100, 2)}%")
 
+    # Dynamic Bullpen Load Shift scaled by self-learning weight
     a_load = fatigue_data.get(away, {}).get("load", 15.0)
     h_load = fatigue_data.get(home, {}).get("load", 15.0)
-    bp_shift = max(-0.06, min(0.06, ((a_load - h_load) / 50.0) * 0.015 * bp_weight))
+    bp_shift = ((a_load - h_load) / 50.0) * 0.015 * bp_weight
     home_prob += bp_shift
-    math_log.append(f"Bullpen Load Shift: {round(bp_shift*100, 2)}%")
+    math_log.append(f"Bullpen Load Shift ({a_load} vs {h_load} | Weight {bp_weight}x) -> Shift: {round(bp_shift*100, 2)}%")
 
+    # Situational Schedule Density Shift
     a_games_7d = fatigue_data.get(away, {}).get("schedule_games_7d", 5)
     h_games_7d = fatigue_data.get(home, {}).get("schedule_games_7d", 5)
-    sched_shift = max(-0.04, min(0.04, (a_games_7d - h_games_7d) * 0.005))
+    sched_shift = (a_games_7d - h_games_7d) * 0.005
     home_prob += sched_shift
-    math_log.append(f"Situational Schedule Shift (Games: {a_games_7d}v{h_games_7d}): {round(sched_shift*100, 2)}%")
+    math_log.append(f"Schedule Shift ({a_games_7d}v{h_games_7d}): {round(sched_shift*100, 2)}%")
 
+    # Home Field Advantage
     home_prob += 0.015
     math_log.append("HFA: +1.50%")
-    home_prob = max(0.35, min(0.65, home_prob))
     
     # Park Factor Adjusted Expected Run Totals
     park_mult = PARK_FACTORS.get(home, 1.00)
@@ -602,9 +610,13 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
 
         if game_date_et != today_date_str: continue
 
-        h_pitcher_info = probable_pitchers.get(home, {"name": "TBD", "id": None})
-        a_pitcher_info = probable_pitchers.get(away, {"name": "TBD", "id": None})
+        h_pitcher_info = probable_pitchers.get(home)
+        a_pitcher_info = probable_pitchers.get(away)
         
+        # HARD GATE: Discard game if either starting pitcher is unconfirmed / TBD
+        if not h_pitcher_info or not a_pitcher_info or not h_pitcher_info.get("name") or not a_pitcher_info.get("name"):
+            continue
+
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, objective_fatigue_ratings, advanced_metrics, memory)
         
         home_rl_cover = calculate_runline_prob(projected_total * home_prob, projected_total * away_prob)
@@ -636,7 +648,7 @@ def parse_json_from_response(response):
 def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text):
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     prompt = f"""
-    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented Poisson distributions, Park Factors, and a 6-metric baseline. Do NOT output any probability above 65%.
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented dynamic self-learning shifts, Poisson distributions, Park Factors, and a 6-metric baseline.
 
     === HISTORICAL REPORT CARD & EVOLUTION LEARNINGS ===
     {past_learnings_text}
@@ -658,11 +670,11 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
     5. RESPECT PARK FACTORS ON TOTALS: Python has integrated Park Factors into 'projected_total_runs'. Do NOT force Over bets in severe pitcher parks (Petco, Oracle, T-Mobile) unless both bullpens are completely broken.
     6. MAX-EV SIDE SELECTION: If multiple markets clear thresholds, ONLY output the ONE market with the HIGHEST EV.
     7. SMART VALIDATION: If pre-game odds are unavailable for pending picks, output action "VALIDATED" to keep them as PENDING.
-    8. REASONING REQUIREMENT: Dive straight into the metrics and narrative without any introductory filler phrase.
+    8. REASONING REQUIREMENT: Ground reasoning strictly on the exact pitcher names and metrics provided in the JSON payload. Dive straight into the breakdown without any introductory filler phrases.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
-      "evolution_learning_note": "Write a dynamic 2-sentence meta-analysis of recent wins/losses summarizing specific metrics that are over- or under-performing (e.g., avoiding overvaluing SP WHIP against elite lineups or respecting park factors on totals).",
+      "evolution_learning_note": "Write a dynamic 2-sentence meta-analysis of recent performance identifying factors that are outperforming or underperforming to guide future runs.",
       "validations": [
         {{ "row_index": <int>, "action": "VALIDATED" or "REJECTED", "updated_odds": <num>, "updated_model_prob": "58.0%", "updated_expected_value": "+11.2%", "reason": "<tight summary>" }}
       ],
@@ -697,12 +709,14 @@ def main():
     if not odds: return
 
     formatted_games = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, memory, today_date_str)
-    if not formatted_games: return
+    if not formatted_games:
+        print("No eligible matchups with confirmed starters found for today.")
+        return
 
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, memory, past_learnings_text)
     
-    # Log to Evolution Tab with dynamic AI learning note
+    # Dynamic meta-learning logged to Evolution & Learnings
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced quantitative multi-factor evaluation.")
     update_evolution_log(spreadsheet, "MLB", memory, learning_note, f"Execution run. Graded {graded_count} bets.", current_time_str)
 
