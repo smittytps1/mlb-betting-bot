@@ -6,6 +6,10 @@ on:
     - cron: '0 11,16 * * *'
   workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
 
+# This permission block fixes the 403 error by allowing the bot to push files
+permissions:
+  contents: write
+
 jobs:
   run-og-bot:
     runs-on: ubuntu-latest
