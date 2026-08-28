@@ -1,9 +1,9 @@
 {
-  "total_bets": 50,
+  "total_bets": 49,
   "wins": 23,
-  "losses": 27,
-  "win_rate": "46.0%",
-  "net_profit_dollars": -790.09,
+  "losses": 26,
+  "win_rate": "46.9%",
+  "net_profit_dollars": -640.09,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -20,9 +20,9 @@
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 14,
-      "losses": 20,
-      "weight": 0.89,
-      "instruction": "Cold streak (41.2%). Dampening shift."
+      "losses": 19,
+      "weight": 0.91,
+      "instruction": "Cold streak (42.4%). Dampening shift."
     },
     "platoon_and_lineup_splits": {
       "wins": 8,
@@ -50,9 +50,9 @@
     },
     "bullpen_depth_and_fatigue": {
       "wins": 19,
-      "losses": 23,
+      "losses": 22,
       "weight": 1.0,
-      "instruction": "Neutral performance (45.2%)."
+      "instruction": "Neutral performance (46.3%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
