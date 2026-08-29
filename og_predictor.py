@@ -56,6 +56,17 @@ def match_canonical_team(name_str):
                 return canonical.title()
     return name_str.strip().title()
 
+def normalize_market_type(bet_type_str):
+    """Normalizes bet types to prevent multi-book duplication."""
+    lower = str(bet_type_str).lower()
+    if "moneyline" in lower or "h2h" in lower:
+        return "moneyline"
+    elif "spread" in lower or "run line" in lower:
+        return "run_line"
+    elif "total" in lower or "over" in lower or "under" in lower:
+        return "total"
+    return lower.strip()
+
 def american_to_decimal(odds):
     try:
         odds_f = float(odds)
@@ -63,19 +74,40 @@ def american_to_decimal(odds):
     except Exception:
         return 1.91
 
-def compute_quarter_kelly_units(odds, model_prob_str):
+def get_vig_free_probs(home_odds, away_odds):
+    """Calculates vig-free market implied probability to use as baseline anchor."""
     try:
+        def implied(odds):
+            val = float(odds)
+            return abs(val) / (abs(val) + 100) if val < 0 else 100 / (val + 100)
+        p_home = implied(home_odds)
+        p_away = implied(away_odds)
+        total = p_home + p_away
+        if total == 0: return 0.50, 0.50
+        return round(p_home / total, 4), round(p_away / total, 4)
+    except Exception:
+        return 0.50, 0.50
+
+def compute_quarter_kelly_units(odds, model_prob_str):
+    """Quarter-Kelly unit calculation bounded by a strict 1.25u ceiling."""
+    try:
+        odds_val = float(odds)
         prob_val = float(str(model_prob_str).replace('%', '').strip()) / 100.0
-        dec_odds = american_to_decimal(odds)
+        dec_odds = american_to_decimal(odds_val)
         b = dec_odds - 1.0
-        if b <= 0: return 1.0
+        if b <= 0: return 0.75
         kelly = (b * prob_val - (1.0 - prob_val)) / b
         if kelly <= 0: return 0.5
         
         raw_units = (kelly * 0.25) * 40.0
-        return max(0.5, min(3.0, round(raw_units, 2)))
+        
+        # Hard Caps: 1.00u ceiling on favorites, 1.25u ceiling on plus-money dogs
+        if odds_val < 100:
+            return max(0.5, min(1.00, round(raw_units, 2)))
+        else:
+            return max(0.5, min(1.25, round(raw_units, 2)))
     except Exception:
-        return 1.0
+        return 0.75
 
 # --- 1. GOOGLE SHEETS SETUP (OG PREDICTOR ISOLATION) ---
 def get_sheets():
@@ -144,7 +176,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
     except Exception as e:
         print(f"Notice while logging to Evolution tab: {e}")
 
-# --- 2. MULTI-SOURCE PROBABLES (ESPN + MLB STATS API) ---
+# --- 2. MULTI-SOURCE PROBABLES ---
 def fetch_today_probable_pitchers(target_date_str):
     pitcher_map = {}
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -298,7 +330,7 @@ def fetch_recent_bullpen_usage(days_back=2):
 
     return objective_ratings
 
-# --- 4. ACCURATE AUTO-GRADING WITH DATE & TIME MATCHING ---
+# --- 4. ACCURATE AUTO-GRADING ---
 def auto_grade_pending_bets(sheet, odds_key):
     try:
         rows = sheet.get_all_values()
@@ -412,7 +444,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         print(f"Auto-grade notice: {e}")
     return 0
 
-# --- 5. ROBUST UNIVERSAL MULTI-TIMEFRAME SCOREBOARD (OG ISOLATION) ---
+# --- 5. SCOREBOARD ENGINE ---
 def update_scoreboard(spreadsheet):
     try:
         try: sb = spreadsheet.worksheet("OG Scoreboard")
@@ -515,7 +547,7 @@ def update_memory_from_sheet(sheet, memory):
         print(f"Memory update notice: {e}")
     return memory
 
-# --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAIL ---
+# --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAILS ---
 def fetch_mlb_odds(odds_key):
     resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
     return resp.json() if resp.status_code == 200 else []
@@ -524,25 +556,6 @@ def get_today_existing_picks(sheet, today_date_str):
     rows = sheet.get_all_values()
     if len(rows) <= 1: return []
     return [{"row_index": i, "date": r[0], "game": r[2], "status": r[10]} for i, r in enumerate(rows[1:], start=2) if r[0] == today_date_str and r[10] == "PENDING"]
-
-def extract_canonical_teams_from_game(game_str):
-    parts = re.split(r'\b(?:at|vs|v|@)\b', str(game_str), flags=re.IGNORECASE)
-    cleaned = [match_canonical_team(p) for p in parts if p.strip()]
-    return tuple(sorted(cleaned))
-
-def game_already_pending(raw_rows, pick_date, game):
-    if len(raw_rows) <= 1: return False
-    headers = [h.strip() for h in raw_rows[0]]
-    try:
-        date_col, game_col, status_col = headers.index("Date"), headers.index("Game"), headers.index("Status")
-    except ValueError: return False
-
-    norm_teams = extract_canonical_teams_from_game(game)
-    for r in raw_rows[1:]:
-        if len(r) > max(date_col, game_col, status_col):
-            if str(r[date_col]).strip() == pick_date and extract_canonical_teams_from_game(r[game_col]) == norm_teams and str(r[status_col]).strip().upper() == "PENDING":
-                return True
-    return False
 
 def check_for_hallucinated_pitchers(game_str, reasoning_str, probable_pitchers):
     try:
@@ -589,12 +602,29 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
         if "TBD" in h_pitcher or "TBD" in a_pitcher: 
             dropped_tbd.append(f"{away} @ {home}")
             continue
+
+        # Extract market odds for vig-free probability anchor
+        home_odds_val, away_odds_val = -110, -110
+        bookmakers = game.get("bookmakers", [])
+        if bookmakers:
+            for book in bookmakers:
+                for market in book.get("markets", []):
+                    if market.get("key") == "h2h":
+                        for outcome in market.get("outcomes", []):
+                            team_name = match_canonical_team(outcome.get("name", ""))
+                            if team_name == home: home_odds_val = outcome.get("price")
+                            elif team_name == away: away_odds_val = outcome.get("price")
+                        break
+                if home_odds_val != -110 or away_odds_val != -110:
+                    break
+        
+        market_home_prob, market_away_prob = get_vig_free_probs(home_odds_val, away_odds_val)
             
         game_copy = dict(game)
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
-            "away": f"{away} | Starter: {a_pitcher} | Bullpen: {objective_fatigue_ratings.get(away, 'Fresh')}",
-            "home": f"{home} | Starter: {h_pitcher} | Bullpen: {objective_fatigue_ratings.get(home, 'Fresh')}"
+            "away": f"{away} | Starter: {a_pitcher} | Market Base Prob: {round(market_away_prob*100, 1)}% | Bullpen: {objective_fatigue_ratings.get(away, 'Fresh')}",
+            "home": f"{home} | Starter: {h_pitcher} | Market Base Prob: {round(market_home_prob*100, 1)}% | Bullpen: {objective_fatigue_ratings.get(home, 'Fresh')}"
         }
         valid.append(game_copy)
         
@@ -635,20 +665,19 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     === RECURSIVE MEMORY & FACTOR WEIGHTS ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
 
-    === TODAY'S MATCHUPS & SEASON-WEIGHTED BULLPEN STATUS (WITH START TIMES) ===
+    === TODAY'S MATCHUPS & VIG-FREE MARKET PROBABILITIES ===
     {json.dumps(formatted_games, indent=2)}
 
     === ACTIVE PENDING PICKS ===
     {json.dumps(open_picks, indent=2)}
 
     STRICT RULES:
-    1. FACTUAL PITCHERS: NEVER invent or swap starting pitchers.
-    2. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, heavily penalize them.
-    3. TIME CONTEXT: Utilize the provided 'start_time' to evaluate schedule fatigue.
-    4. MARKET SELECTION: Balance selections across Moneylines, Run Lines, and Totals where edges exist.
-    5. SPORTSBOOKS: FanDuel, DraftKings, BetMGM, Caesars ONLY.
-    6. THE 11 PERCENT EV THRESHOLD (UNCAPPED): Evaluate every single matchup on the board. You MUST recommend every single play that calculates to an Expected Value (EV) of 11.0% or higher. There is NO CAP on the number of picks. If 10 games clear the 11.0% threshold, output all 10. If zero games clear it, output 0.
-    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0% due to line movement or fatigue updates, output "REJECTED" for that pick. If it remains at or above 11.0%, output "VALIDATED". If 'ACTIVE PENDING PICKS' is empty, return an empty array (`"validations": []`).
+    1. MARKET PROBABILITY ANCHOR: You MUST anchor all probability evaluations to the provided 'Market Base Prob'. Do NOT evaluate massive underdogs (+160 or higher) as 50/50 coin flips. Maximum allowable shift from the Market Base Prob is ±7.0%.
+    2. FACTUAL PITCHERS: NEVER invent or swap starting pitchers. Ground analysis in confirmed starters.
+    3. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, penalize them appropriately, but do not let bullpen fatigue completely override elite starting pitchers.
+    4. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
+    5. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
+    6. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -774,14 +803,46 @@ def main():
 
                 print(f"Row {row_idx} evaluated as {action}.")
 
-    raw_rows = sheet.get_all_values()
-    appended, skipped = 0, 0
-    
+    # Deduplication map at market level (e.g., "Away @ Home | moneyline")
+    existing_rows = sheet.get_all_values()
+    existing_market_signatures = set()
+    if len(existing_rows) > 1:
+        for r in existing_rows[1:]:
+            if len(r) > 10 and str(r[10]).strip().upper() == "PENDING":
+                game_sig = str(r[2]).strip()
+                market_sig = normalize_market_type(r[3])
+                existing_market_signatures.add(f"{game_sig} | {market_sig}")
+
+    # Python-level Top-5 Cap sorted by EV
+    def parse_ev(item):
+        try:
+            return float(str(item.get("expected_value", "0")).replace("%", "").replace("+", "").strip())
+        except Exception:
+            return 0.0
+
+    valid_new_picks = []
     for p in new_picks:
-        if not isinstance(p, dict):
-            print(f"  [Warning] Skipping malformed pick entry: {p}")
+        if not isinstance(p, dict): continue
+        game = str(p.get("game", "")).strip()
+        bet_type = str(p.get("bet_type", "")).strip()
+        market_norm = normalize_market_type(bet_type)
+        market_signature = f"{game} | {market_norm}"
+        reasoning = str(p.get("reasoning", "")).strip()
+
+        if market_signature in existing_market_signatures:
+            print(f"Skipping duplicate market play: {market_signature}")
             continue
 
+        if not check_for_hallucinated_pitchers(game, reasoning, probable_pitchers):
+            continue
+
+        valid_new_picks.append(p)
+
+    # Strictly take top 5 highest EV picks
+    top_5_picks = sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]
+    
+    appended = 0
+    for p in top_5_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
         start_time_out = str(p.get("start_time", "")).strip()
         game = str(p.get("game", "")).strip()
@@ -793,15 +854,6 @@ def main():
         try: odds_val = float(p.get("odds", -110))
         except: odds_val = -110.0
 
-        if game_already_pending(raw_rows, pick_date, game):
-            print(f"Skipping duplicate game prediction: {game}")
-            skipped += 1
-            continue
-            
-        if not check_for_hallucinated_pitchers(game, reasoning, probable_pitchers):
-            skipped += 1
-            continue
-
         qk_units = compute_quarter_kelly_units(odds_val, model_prob_str)
 
         sheet.append_row([
@@ -810,9 +862,11 @@ def main():
             qk_units, "PENDING", 0.0, reasoning, "NEW", p.get("high_agreement", "No"),
             start_time_out
         ], value_input_option="USER_ENTERED")
+        
+        existing_market_signatures.add(f"{game} | {normalize_market_type(bet_type)}")
         appended += 1
             
-    print(f"Execution complete! Added {appended} new pick(s). Skipped {skipped} duplicate(s)/hallucination(s).")
+    print(f"Execution complete! Added {appended} new pick(s) (Capped at Top 5).")
 
 if __name__ == "__main__":
     main()
