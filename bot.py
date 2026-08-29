@@ -94,14 +94,10 @@ def match_canonical_team(name_str):
     return name_str.strip().title()
 
 def normalize_market_type(bet_type_str):
-    """Strips out sportsbook names to prevent multi-book duplicate bets."""
     lower = str(bet_type_str).lower()
-    if "moneyline" in lower or "h2h" in lower:
-        return "moneyline"
-    elif "spread" in lower or "run line" in lower:
-        return "run_line"
-    elif "total" in lower or "over" in lower or "under" in lower:
-        return "total"
+    if "moneyline" in lower or "h2h" in lower: return "moneyline"
+    elif "spread" in lower or "run line" in lower: return "run_line"
+    elif "total" in lower or "over" in lower or "under" in lower: return "total"
     return lower.strip()
 
 def american_to_decimal(odds):
@@ -111,8 +107,21 @@ def american_to_decimal(odds):
     except Exception:
         return 1.91
 
+def get_vig_free_probs(home_odds, away_odds):
+    """Calculates vig-free market implied probability to use as the true baseline."""
+    try:
+        def implied(odds):
+            val = float(odds)
+            return abs(val) / (abs(val) + 100) if val < 0 else 100 / (val + 100)
+        p_home = implied(home_odds)
+        p_away = implied(away_odds)
+        total = p_home + p_away
+        if total == 0: return 0.50, 0.50
+        return p_home / total, p_away / total
+    except Exception:
+        return 0.50, 0.50
+
 def compute_quarter_kelly_units(odds, model_prob_str):
-    """Calculates Quarter-Kelly units with a strict 1.25u hard ceiling."""
     try:
         odds_val = float(odds)
         prob_val = float(str(model_prob_str).replace('%', '').strip()) / 100.0
@@ -123,7 +132,6 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         if kelly <= 0: return 0.5
         raw_units = (kelly * 0.25) * 40.0
         
-        # Hard caps: Favorites max 1.00u, Plus-Money dogs max 1.25u
         if odds_val < 100:
             return max(0.5, min(1.00, round(raw_units, 2)))
         else:
@@ -472,12 +480,12 @@ def update_memory_from_sheet(sheet, memory):
     except Exception: pass
     return memory
 
-# --- 6-METRIC BASELINE MATH ENGINE WITH STRICT BOUNDS ---
-def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigue_data, advanced_metrics, memory):
-    home_prob = 0.50 
-    math_log = []
-    weights = memory.get("reasoning_factor_weights", {})
+# --- 6-METRIC BASELINE MATH ENGINE WITH STRICT BOUNDS AND IMPLIED PROBABILITY ANCHOR ---
+def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigue_data, advanced_metrics, memory, market_home_prob):
+    home_prob = market_home_prob 
+    math_log = [f"Market Vig-Free Baseline: {round(market_home_prob*100, 1)}%"]
     
+    weights = memory.get("reasoning_factor_weights", {})
     bp_weight = weights.get("bullpen_depth_and_fatigue", {}).get("weight", 1.0)
     ops_weight = weights.get("platoon_and_lineup_splits", {}).get("weight", 1.0)
     whip_weight = weights.get("starting_pitcher_expected_metrics", {}).get("weight", 1.0)
@@ -487,46 +495,49 @@ def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigu
     a_name_str = a_pitcher_info.get("name", "TBD")
     h_name_str = h_pitcher_info.get("name", "TBD")
 
-    # SP WHIP Shift (Capped at ±6.0%)
-    sp_raw = ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.018 * whip_weight
-    sp_shift = max(-0.06, min(0.06, sp_raw))
+    # SP WHIP Shift (Dominant Factor: Capped at ±5.0%)
+    sp_raw = ((a_sp_stats["whip"] - h_sp_stats["whip"]) / 0.10) * 0.02 * whip_weight
+    sp_shift = max(-0.05, min(0.05, sp_raw))
     home_prob += sp_shift
     math_log.append(f"SP WHIP ({a_name_str}: {a_sp_stats['whip']} vs {h_name_str}: {h_sp_stats['whip']} | Weight {whip_weight}x) -> Shift: {round(sp_shift*100, 2)}%")
 
-    # Lineup OPS Shift (Capped at ±4.0%)
+    # Lineup OPS Shift (Capped at ±2.5%)
     a_ops = advanced_metrics.get(away, {}).get("ops", 0.720)
     h_ops = advanced_metrics.get(home, {}).get("ops", 0.720)
     ops_raw = ((h_ops - a_ops) / 0.050) * 0.012 * ops_weight
-    ops_shift = max(-0.04, min(0.04, ops_raw))
+    ops_shift = max(-0.025, min(0.025, ops_raw))
     home_prob += ops_shift
     math_log.append(f"OPS Shift ({a_ops} vs {h_ops} | Weight {ops_weight}x) -> Shift: {round(ops_shift*100, 2)}%")
 
-    # Contact Quality ISO Shift (Capped at ±2.0%)
+    # Contact Quality ISO Shift (Capped at ±1.5%)
     a_iso = advanced_metrics.get(away, {}).get("iso", 0.150)
     h_iso = advanced_metrics.get(home, {}).get("iso", 0.150)
-    iso_shift = max(-0.02, min(0.02, ((h_iso - a_iso) / 0.020) * 0.008))
+    iso_shift = max(-0.015, min(0.015, ((h_iso - a_iso) / 0.020) * 0.005))
     home_prob += iso_shift
     math_log.append(f"ISO Shift: {round(iso_shift*100, 2)}%")
 
     # STRICT BULLPEN SHIFT CAP (Capped at ±1.5% MAX)
     a_load = fatigue_data.get(away, {}).get("load", 15.0)
     h_load = fatigue_data.get(home, {}).get("load", 15.0)
-    bp_raw = ((a_load - h_load) / 50.0) * 0.010 * bp_weight
+    bp_raw = ((a_load - h_load) / 50.0) * 0.0075 * bp_weight
     bp_shift = max(-0.015, min(0.015, bp_raw))
     home_prob += bp_shift
     math_log.append(f"Bullpen Shift ({a_load} vs {h_load} | Capped at ±1.5%) -> Shift: {round(bp_shift*100, 2)}%")
 
-    # Schedule Density Shift (Capped at ±2.0%)
+    # Schedule Density Shift (Capped at ±1.0%)
     a_games_7d = fatigue_data.get(away, {}).get("schedule_games_7d", 5)
     h_games_7d = fatigue_data.get(home, {}).get("schedule_games_7d", 5)
-    sched_shift = max(-0.02, min(0.02, (a_games_7d - h_games_7d) * 0.004))
+    sched_shift = max(-0.01, min(0.01, (a_games_7d - h_games_7d) * 0.002))
     home_prob += sched_shift
     math_log.append(f"Schedule Shift ({a_games_7d}v{h_games_7d}): {round(sched_shift*100, 2)}%")
 
-    # Home Field Advantage (+1.50%)
-    home_prob += 0.015
-    math_log.append("HFA: +1.50%")
-    home_prob = max(0.35, min(0.65, home_prob))
+    # Cap total drift from market baseline to ±8.0% to prevent phantom EV inflation
+    total_drift = home_prob - market_home_prob
+    total_drift = max(-0.08, min(0.08, total_drift))
+    home_prob = market_home_prob + total_drift
+
+    # Hard boundary extreme failsafe
+    home_prob = max(0.15, min(0.85, home_prob))
     
     # Park Factor Adjusted Expected Run Totals
     park_mult = PARK_FACTORS.get(home, 1.00)
@@ -630,7 +641,25 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         if not h_pitcher_info or not a_pitcher_info or not h_pitcher_info.get("name") or not a_pitcher_info.get("name"):
             continue
 
-        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, objective_fatigue_ratings, advanced_metrics, memory)
+        # Extract market odds to use as baseline anchor
+        home_odds_val = -110
+        away_odds_val = -110
+        bookmakers = game.get("bookmakers", [])
+        if bookmakers:
+            for book in bookmakers:
+                for market in book.get("markets", []):
+                    if market.get("key") == "h2h":
+                        for outcome in market.get("outcomes", []):
+                            team_name = match_canonical_team(outcome.get("name", ""))
+                            if team_name == home: home_odds_val = outcome.get("price")
+                            elif team_name == away: away_odds_val = outcome.get("price")
+                        break
+                if home_odds_val != -110 or away_odds_val != -110:
+                    break
+        
+        market_home_prob, market_away_prob = get_vig_free_probs(home_odds_val, away_odds_val)
+
+        home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, objective_fatigue_ratings, advanced_metrics, memory, market_home_prob)
         
         home_rl_cover = calculate_runline_prob(projected_total * home_prob, projected_total * away_prob)
         away_rl_cover = calculate_runline_prob(projected_total * away_prob, projected_total * home_prob)
@@ -661,7 +690,7 @@ def parse_json_from_response(response):
 def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text):
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     prompt = f"""
-    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented bounded self-learning shifts, Poisson distributions, Park Factors, and a 6-metric baseline.
+    You are an elite Bounded Multi-Factor Sports Betting Analyst. Python has implemented bounded self-learning shifts, Poisson distributions, Park Factors, and an implied probability baseline.
 
     === HISTORICAL REPORT CARD & EVOLUTION LEARNINGS ===
     {past_learnings_text}
@@ -679,8 +708,8 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
        - Plus-Money Underdogs (+120 or higher): >= 14.0% EV (Strict selective threshold).
        - Favorites & -1.5 Run Lines: >= 7.0% EV.
        - Totals (Over/Under): >= 12.0% EV.
-    4. PROHIBIT JUICED +1.5 UNDERDOGS: Do NOT pick +1.5 underdog spreads with odds worse than -125 (e.g., -135, -156). If an underdog offers value, take their straight plus-money Moneyline instead.
-    5. RESPECT PARK FACTORS ON TOTALS: Python has integrated Park Factors into 'projected_total_runs'. Do NOT force Over bets in severe pitcher parks (Petco, Oracle, T-Mobile) unless both bullpens are completely broken.
+    4. PROHIBIT JUICED +1.5 UNDERDOGS: Do NOT pick +1.5 underdog spreads with odds worse than -125. If an underdog offers value, take their straight plus-money Moneyline instead.
+    5. RESPECT PARK FACTORS ON TOTALS: Python has integrated Park Factors into 'projected_total_runs'. Do NOT force Over bets in severe pitcher parks unless both bullpens are completely broken.
     6. MAX-EV SIDE SELECTION: If multiple markets clear thresholds, ONLY output the ONE market with the HIGHEST EV.
     7. SMART VALIDATION: If pre-game odds are unavailable for pending picks, output action "VALIDATED" to keep them as PENDING.
     8. REASONING REQUIREMENT: Ground reasoning strictly on confirmed pitcher names and metrics provided in the JSON payload. Dive straight into the analysis without any introductory filler phrase.
@@ -757,7 +786,6 @@ def main():
 
     mlb_picks = ai_response.get("mlb_tab_picks", [])
     
-    # Strict market-level signature deduplication (e.g., "Away @ Home | moneyline")
     existing_rows = mlb_sheet.get_all_values()
     existing_market_signatures = set()
     if len(existing_rows) > 1:
@@ -772,7 +800,6 @@ def main():
         market_norm = normalize_market_type(bet_type_label)
         market_signature = f"{game} | {market_norm}"
         
-        # Block unauthorized sportsbooks or duplicate market-level plays
         if not any(sb.lower() in bet_type_label.lower() for sb in ALLOWED_SPORTSBOOKS) or market_signature in existing_market_signatures:
             continue
             
