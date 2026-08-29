@@ -43,6 +43,8 @@ MLB_TEAM_ALIASES = {
     "washington nationals": ["washington nationals", "nationals", "nats", "wsh", "was", "washington"]
 }
 
+ALLOWED_SPORTSBOOKS = ["FanDuel", "DraftKings", "BetMGM", "Caesars"]
+
 def normalize_text(text):
     return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
