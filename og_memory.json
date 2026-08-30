@@ -1,9 +1,9 @@
 {
   "total_bets": 37,
-  "wins": 16,
-  "losses": 21,
-  "win_rate": "43.2%",
-  "net_profit_dollars": -949.23,
+  "wins": 17,
+  "losses": 20,
+  "win_rate": "45.9%",
+  "net_profit_dollars": -755.71,
   "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
@@ -31,10 +31,10 @@
       "instruction": "Baseline sample size."
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 11,
-      "losses": 17,
-      "weight": 0.87,
-      "instruction": "Cold streak (39.3%). De-emphasize."
+      "wins": 12,
+      "losses": 16,
+      "weight": 1.0,
+      "instruction": "Neutral performance (42.9%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
