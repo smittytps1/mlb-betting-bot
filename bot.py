@@ -133,7 +133,10 @@ def calculate_total_prob(lam_total, line, is_over=True):
         p = poisson_probability(lam_total, total_runs)
         if is_over and total_runs > numeric_line: prob_exact += p
         elif not is_over and total_runs < numeric_line: prob_exact += p
-    return max(0.05, min(0.95, prob_exact))
+    
+    # HARD COMPRESSION: Keep calculated probabilities grounded to realistic MLB variance
+    # Cap total cover probabilities between 40% and 59% max.
+    return max(0.40, min(0.59, prob_exact))
 
 def get_sheets():
     print("Connecting to Google Sheets ('MLB' Tab)...")
@@ -517,9 +520,22 @@ def calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, fatigu
     
     # Park Factor Adjusted Expected Run Totals
     park_mult = PARK_FACTORS.get(home, 1.00)
-    raw_total = advanced_metrics.get(away, {}).get("runs_per_game", 4.5) + advanced_metrics.get(home, {}).get("runs_per_game", 4.5)
-    projected_total = round(raw_total * park_mult, 1)
-    math_log.append(f"Park Factor ({home}): {park_mult}x -> Projected Total: {projected_total}")
+    raw_total = advanced_metrics.get(away, {}).get("runs_per_game", 4.3) + advanced_metrics.get(home, {}).get("runs_per_game", 4.3)
+    
+    # Compress raw totals toward MLB average (approx 8.5)
+    blended_total = (raw_total * 0.4) + (8.5 * 0.6)
+    
+    # Dampen park factors to avoid extreme scaling
+    park_factor_dampened = 1.0 + (park_mult - 1.0) * 0.5
+    
+    projected_total = round(blended_total * park_factor_dampened, 2)
+    
+    # Apply a strictly capped bullpen shift to the run total (+/- 0.25 runs max)
+    bp_run_shift = (((a_load + h_load) - 100.0) / 100.0) * 0.25
+    bp_run_shift = max(-0.25, min(0.25, bp_run_shift)) 
+    projected_total = round(projected_total + bp_run_shift, 1)
+    
+    math_log.append(f"Park Factor Dampened: {round(park_factor_dampened,2)}x, Bullpen Run Shift: {round(bp_run_shift, 2)} -> Projected Total: {projected_total}")
     
     return home_prob, 1.0 - home_prob, projected_total, " | ".join(math_log)
 
@@ -730,6 +746,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
     7. SMART VALIDATION: If pre-game odds are unavailable for pending picks, output action "VALIDATED" to keep them as PENDING.
     8. REASONING REQUIREMENT: Ground reasoning strictly on confirmed pitcher names and metrics provided in the JSON payload. Dive straight into the analysis without any introductory filler phrase.
     9. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
+    10. TOTALS PROBABILITY COMPRESSION: MLB run distributions have massive variance. NEVER project a Model Probability higher than 58.0% for any Over/Under Total. If the EV is strong, cap your model_prob at 57% or 58%.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
