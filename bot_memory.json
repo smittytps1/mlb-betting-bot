@@ -1,9 +1,9 @@
 {
-  "total_bets": 107,
-  "wins": 51,
-  "losses": 56,
-  "win_rate": "47.7%",
-  "net_profit_dollars": -327.9,
+  "total_bets": 112,
+  "wins": 52,
+  "losses": 60,
+  "win_rate": "46.4%",
+  "net_profit_dollars": -675.26,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -19,16 +19,16 @@
   "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 41,
-      "losses": 49,
-      "weight": 1.0,
-      "instruction": "Neutral performance (45.6%)."
+      "wins": 42,
+      "losses": 52,
+      "weight": 0.94,
+      "instruction": "Cold streak (44.7%). Dampening shift."
     },
     "platoon_and_lineup_splits": {
-      "wins": 21,
+      "wins": 22,
       "losses": 20,
       "weight": 1.0,
-      "instruction": "Neutral performance (51.2%)."
+      "instruction": "Neutral performance (52.4%)."
     },
     "statcast_contact_quality": {
       "wins": 0,
@@ -49,10 +49,10 @@
       "instruction": "Baseline sample size."
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 42,
-      "losses": 44,
+      "wins": 43,
+      "losses": 48,
       "weight": 1.0,
-      "instruction": "Neutral performance (48.8%)."
+      "instruction": "Neutral performance (47.3%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
