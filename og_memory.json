@@ -1,9 +1,9 @@
 {
-  "total_bets": 59,
-  "wins": 29,
-  "losses": 30,
-  "win_rate": "49.2%",
-  "net_profit_dollars": 221.43,
+  "total_bets": 64,
+  "wins": 30,
+  "losses": 34,
+  "win_rate": "46.9%",
+  "net_profit_dollars": 4.55,
   "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
@@ -31,10 +31,10 @@
       "instruction": "Baseline sample size."
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 17,
-      "losses": 23,
+      "wins": 18,
+      "losses": 26,
       "weight": 1.0,
-      "instruction": "Neutral performance (42.5%)."
+      "instruction": "Neutral performance (40.9%)."
     },
     "umpire_and_situational_fatigue": {
       "wins": 0,
