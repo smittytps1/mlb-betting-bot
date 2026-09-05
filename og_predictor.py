@@ -59,7 +59,6 @@ def match_canonical_team(name_str):
     return name_str.strip().title()
 
 def normalize_market_type(bet_type_str):
-    """Normalizes bet types to prevent multi-book duplication."""
     lower = str(bet_type_str).lower()
     if "moneyline" in lower or "h2h" in lower:
         return "moneyline"
@@ -77,7 +76,6 @@ def american_to_decimal(odds):
         return 1.91
 
 def get_vig_free_probs(home_odds, away_odds):
-    """Calculates vig-free market implied probability to use as baseline anchor."""
     try:
         def implied(odds):
             val = float(odds)
@@ -91,7 +89,6 @@ def get_vig_free_probs(home_odds, away_odds):
         return 0.50, 0.50
 
 def compute_quarter_kelly_units(odds, model_prob_str):
-    """Quarter-Kelly unit calculation bounded by a strict 1.25u ceiling."""
     try:
         odds_val = float(odds)
         prob_val = float(str(model_prob_str).replace('%', '').strip()) / 100.0
@@ -103,7 +100,6 @@ def compute_quarter_kelly_units(odds, model_prob_str):
         
         raw_units = (kelly * 0.25) * 40.0
         
-        # Hard Caps: 1.00u ceiling on favorites, 1.25u ceiling on plus-money dogs
         if odds_val < 100:
             return max(0.5, min(1.00, round(raw_units, 2)))
         else:
@@ -160,10 +156,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
         if not evo_sheet: return
         
         factors = memory.get("reasoning_factor_weights", {})
-        if factors:
-            weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()])
-        else:
-            weights_str = "Standard (1.0x)"
+        weights_str = " | ".join([f"{k}: {v.get('weight', 1.0)}x" for k, v in factors.items()]) if factors else "Standard (1.0x)"
 
         evo_sheet.append_row([
             time_str, 
@@ -196,7 +189,7 @@ def fetch_today_probable_pitchers(target_date_str):
                     for c in competitors:
                         if c.get("id") == team_id or c.get("team", {}).get("id") == team_id:
                             pitcher_map[match_canonical_team(c.get("team", {}).get("displayName", ""))] = p_name
-    except Exception as e: print(f"ESPN Probables notice: {e}")
+    except Exception: pass
 
     try:
         mlb_url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date_str}&hydrate=probablePitcher(note)"
@@ -215,62 +208,71 @@ def fetch_today_probable_pitchers(target_date_str):
                         if canonical and (canonical not in pitcher_map or "TBD" in pitcher_map[canonical]):
                             pitcher_info = team_data.get("probablePitcher", {})
                             if pitcher_info:
-                                p_name = pitcher_info.get("fullName", "TBD")
-                                pitcher_map[canonical] = p_name
-    except Exception as e:
-        print(f"MLB API Probables notice: {e}")
+                                pitcher_map[canonical] = pitcher_info.get("fullName", "TBD")
+    except Exception: pass
 
     return pitcher_map
 
-# --- 3. HIGH-LEVERAGE BULLPEN ENGINE ---
-def fetch_team_high_leverage_hierarchies():
-    high_leverage_map = {}
+def get_mlb_teams_map():
+    resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers={"User-Agent": "Mozilla/5.0"})
+    teams = {}
+    if resp.status_code == 200:
+        for t in resp.json().get("teams", []): teams[t["id"]] = match_canonical_team(t["name"])
+    return teams
+
+def fetch_high_leverage_relievers(teams_map):
+    current_year = datetime.now(ZoneInfo("America/New_York")).year
     headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        teams_resp = requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1", headers=headers, timeout=10)
-        if teams_resp.status_code != 200: return {}
-        
-        for t in teams_resp.json().get("teams", []):
-            team_id = t.get("id")
-            canonical_name = match_canonical_team(t.get("name", ""))
-            if not canonical_name: continue
+    leverage_weights = {}
 
-            stats_url = f"https://statsapi.mlb.com/api/v1/teams/{team_id}/roster?hydrate=person(stats(type=season))"
-            stats_resp = requests.get(stats_url, headers=headers, timeout=5)
-            if stats_resp.status_code != 200: continue
+    for team_id in teams_map.keys():
+        try:
+            url = f"https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&playerPool=all&season={current_year}&teamId={team_id}&gameType=R"
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code != 200: continue
+            stats_list = resp.json().get("stats", [])
+            if not stats_list: continue
 
-            closers, setup_men = [], []
-            for roster_item in stats_resp.json().get("roster", []):
-                person = roster_item.get("person", {})
-                p_name = person.get("fullName", "")
-                for s in person.get("stats", []):
-                    if s.get("type", {}).get("displayName") == "season":
-                        split = s.get("splits", [])
-                        if split:
-                            stat_data = split[0].get("stat", {})
-                            saves = int(stat_data.get("saves", 0))
-                            holds = int(stat_data.get("holds", 0))
-                            if saves >= 2: closers.append((p_name, saves))
-                            if holds >= 2: setup_men.append((p_name, holds))
+            relievers = []
+            for split in stats_list[0].get("splits", []):
+                pid = split.get("player", {}).get("id")
+                stat = split.get("stat", {})
+                games = int(stat.get("gamesPitched", 0))
+                games_started = int(stat.get("gamesStarted", 0))
 
-            closers.sort(key=lambda x: x[1], reverse=True)
-            setup_men.sort(key=lambda x: x[1], reverse=True)
+                if games > 0 and (games - games_started) >= 5:
+                    relievers.append({
+                        "id": pid,
+                        "saves": int(stat.get("saves", 0)),
+                        "holds": int(stat.get("holds", 0)),
+                        "games_finished": int(stat.get("gamesFinished", 0))
+                    })
 
-            high_leverage_map[canonical_name] = {
-                "closer": closers[0][0] if closers else "Unknown Closer",
-                "setup": [s[0] for s in setup_men[:2]]
-            }
-    except Exception:
-        pass
-    return high_leverage_map
+            if not relievers: continue
 
-def fetch_recent_bullpen_usage(days_back=2):
-    hl_hierarchy = fetch_team_high_leverage_hierarchies()
+            relievers_by_saves = sorted(relievers, key=lambda x: (x["saves"], x["games_finished"]), reverse=True)
+            primary_closer = relievers_by_saves[0]
+            if primary_closer["saves"] >= 2 or primary_closer["games_finished"] >= 5:
+                leverage_weights[primary_closer["id"]] = 2.0
+
+            remaining = [r for r in relievers if r["id"] != primary_closer["id"]]
+            relievers_by_holds = sorted(remaining, key=lambda x: x["holds"], reverse=True)
+            for setup_man in relievers_by_holds[:2]:
+                if setup_man["holds"] >= 2:
+                    leverage_weights[setup_man["id"]] = 1.5
+        except Exception:
+            continue
+    return leverage_weights
+
+def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
+    teams_map = get_mlb_teams_map()
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
-    team_stats = {}
     
-    for d in range(1, days_back + 1):
+    team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0, "high_lev_pitcher_dates": {}} for name in teams_map.values()}
+    leverage_weights = fetch_high_leverage_relievers(teams_map)
+
+    for d in range(1, days_back_schedule + 1):
         target_date = (today - timedelta(days=d)).strftime("%Y-%m-%d")
         schedule_resp = requests.get(f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={target_date}", headers=headers, timeout=10)
         if schedule_resp.status_code != 200: continue
@@ -280,56 +282,61 @@ def fetch_recent_bullpen_usage(days_back=2):
         for game in dates[0].get("games", []):
             if game.get("status", {}).get("abstractGameState") != "Final": continue
             game_pk = game.get("gamePk")
-            box_resp = requests.get(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore", headers=headers, timeout=10)
-            if box_resp.status_code != 200: continue
-            box_data = box_resp.json()
-
             for side in ["away", "home"]:
-                team_box = box_data.get("teams", {})[side]
-                canonical = match_canonical_team(team_box.get("team", {}).get("name", ""))
-                if not canonical: continue
+                team_id = game.get("teams", {})[side].get("team", {}).get("id")
+                canonical = teams_map.get(team_id)
+                if canonical: team_stats[canonical]["schedule_games_7d"] += 1
 
-                if canonical not in team_stats:
-                    team_stats[canonical] = {"raw_pitches": 0, "weighted_load": 0.0, "closer_b2b": False, "setup_b2b": False}
-
-                hierarchy = hl_hierarchy.get(canonical, {"closer": "", "setup": []})
-                closer_name = hierarchy.get("closer")
-                setup_names = hierarchy.get("setup", [])
-
-                pitchers = team_box.get("pitchers", [])
-                players = team_box.get("players", {})
-
-                if len(pitchers) > 1:
-                    for pid in pitchers[1:]:
-                        p_info = players.get(f"ID{pid}", {})
-                        p_name = p_info.get("person", {}).get("fullName", "")
-                        p_stats = p_info.get("stats", {}).get("pitching", {})
-                        pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
-
-                        if p_name == closer_name:
-                            weight = 3.0
-                            team_stats[canonical]["closer_b2b"] = True
-                        elif p_name in setup_names:
-                            weight = 2.0
-                            team_stats[canonical]["setup_b2b"] = True
-                        else:
-                            weight = 1.0
-
-                        team_stats[canonical]["raw_pitches"] += pitches
-                        team_stats[canonical]["weighted_load"] += (pitches * weight)
+            if d <= days_back_bp:
+                box_resp = requests.get(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore", headers=headers, timeout=10)
+                if box_resp.status_code != 200: continue
+                box_data = box_resp.json()
+                for side in ["away", "home"]:
+                    team_box = box_data.get("teams", {})[side]
+                    canonical = teams_map.get(team_box.get("team", {}).get("id"))
+                    if not canonical: continue
+                    pitchers = team_box.get("pitchers", [])
+                    players = team_box.get("players", {})
+                    
+                    if len(pitchers) > 1:
+                        relief_pitcher_ids = pitchers[1:]
+                        game_relief_pitches = 0
+                        for pid in relief_pitcher_ids:
+                            p_stats = players.get(f"ID{pid}", {}).get("stats", {}).get("pitching", {})
+                            raw_pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
+                            
+                            weight = leverage_weights.get(pid, 1.0)
+                            game_relief_pitches += (raw_pitches * weight)
+                            
+                            if weight >= 1.5:
+                                if pid not in team_stats[canonical]["high_lev_pitcher_dates"]:
+                                    team_stats[canonical]["high_lev_pitcher_dates"][pid] = set()
+                                team_stats[canonical]["high_lev_pitcher_dates"][pid].add(target_date)
+                                
+                        if game_relief_pitches > 0:
+                            team_stats[canonical]["total_pitches"] += game_relief_pitches
+                            team_stats[canonical]["bp_dates"].add(target_date)
+                            team_stats[canonical]["appearances"] += len(relief_pitcher_ids)
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        load = stats["weighted_load"]
-        c_b2b = stats["closer_b2b"]
-        s_b2b = stats["setup_b2b"]
-
-        if c_b2b or load >= 100: status = f"TAXED / FATIGUED (Closer B2B Burn: {c_b2b})"
-        elif s_b2b or load >= 60: status = "MODERATELY WORKED (Setup Men Used)"
-        else: status = "FRESH / RESTED (Shutdown Arms Available)"
-
-        objective_ratings[team] = f"Status: {status} | Weighted Backend Load: {round(load, 1)}"
-
+        total_p = stats["total_pitches"]
+        load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
+        
+        if load >= 90.0:
+            status = "TAXED"
+        elif load >= 65.0:
+            status = "MODERATELY WORKED"
+        else:
+            status = "FRESH"
+            
+        has_b2b_high_lev = any(len(dates) >= 2 for dates in stats["high_lev_pitcher_dates"].values())
+            
+        objective_ratings[team] = {
+            "status_string": f"Status: {status} | Load Index: {load} | Relief Apps: {stats['appearances']} | Weighted Pitches (2 Days): {total_p} | Games Played (Last 7 Days): {stats['schedule_games_7d']}",
+            "load": load,
+            "closer_b2b": has_b2b_high_lev
+        }
     return objective_ratings
 
 # --- 4. ACCURATE AUTO-GRADING ---
@@ -338,113 +345,94 @@ def auto_grade_pending_bets(sheet, odds_key):
         rows = sheet.get_all_values()
         if len(rows) <= 1: return 0
         headers = [h.strip() for h in rows[0]]
-        
-        status_idx = headers.index("Status")
-        game_idx = headers.index("Game")
-        bet_type_idx = headers.index("Bet Type / Sportsbook")
-        pick_idx = headers.index("Pick")
-        odds_idx = headers.index("Odds")
-        units_idx = headers.index("Units")
-        start_time_idx = headers.index("Game Start Time") if "Game Start Time" in headers else -1
+        status_idx = headers.index("Status") if "Status" in headers else 10
+        game_idx = headers.index("Game") if "Game" in headers else 2
+        bet_type_idx = headers.index("Bet Type / Sportsbook") if "Bet Type / Sportsbook" in headers else 3
+        pick_idx = headers.index("Pick") if "Pick" in headers else 4
+        odds_idx = headers.index("Odds") if "Odds" in headers else 5
+        units_idx = headers.index("Units") if "Units" in headers else 9
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
 
-        scores_url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3"
-        resp = requests.get(scores_url)
+        resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3", timeout=10)
         if resp.status_code != 200: return 0
         scores_data = resp.json()
         updates = []
 
         for row_idx, r in pending_rows:
-            pick_date_str = str(r[0]).strip()
-            game_title = str(r[game_idx]).strip()
-            bet_type = str(r[bet_type_idx]).strip().lower()
-            pick_str = str(r[pick_idx]).strip()
-            logged_start_time = str(r[start_time_idx]).strip() if start_time_idx != -1 and len(r) > start_time_idx else ""
-            
-            try: odds = float(r[odds_idx])
-            except: odds = -110.0
-            
-            try: units = float(r[units_idx]) if r[units_idx] else 1.0
-            except: units = 1.0
+            try:
+                pick_date_str = str(r[0]).strip()
+                game_title = str(r[game_idx]).strip()
+                bet_type = str(r[bet_type_idx]).strip().lower()
+                pick_str = str(r[pick_idx]).strip()
+                odds = float(r[odds_idx]) if r[odds_idx] else -110.0
+                units = float(r[units_idx]) if r[units_idx] else 1.0
 
-            for match in scores_data:
-                if not match.get("completed"): continue
-                
-                commence_time_str = match.get("commence_time", "")
-                match_time_et_str = ""
-                match_date_ny_str = ""
-                
-                if commence_time_str:
-                    try:
-                        game_dt_utc = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
-                        game_dt_ny = game_dt_utc.astimezone(ZoneInfo("America/New_York"))
-                        match_date_ny_str = game_dt_ny.strftime("%Y-%m-%d")
-                        match_time_et_str = game_dt_ny.strftime("%Y-%m-%d %I:%M %p EDT")
-                    except Exception:
-                        pass
-                
-                if logged_start_time:
-                    if logged_start_time != match_time_et_str and not logged_start_time.startswith(match_date_ny_str): continue
-                else:
+                for match in scores_data:
+                    if not match.get("completed"): continue
+                    match_date_ny_str = ""
+                    if match.get("commence_time"):
+                        try:
+                            match_date_ny_str = datetime.fromisoformat(match.get("commence_time").replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+                        except Exception: pass
+                    
                     if pick_date_str != match_date_ny_str: continue
-
-                home_team = match.get("home_team", "")
-                away_team = match.get("away_team", "")
-                home_canonical = match_canonical_team(home_team)
-                away_canonical = match_canonical_team(away_team)
-
-                if (home_canonical in game_title or away_canonical in game_title or home_team in game_title or away_team in game_title):
-                    scores = match.get("scores")
-                    if not scores or len(scores) < 2: continue
-                    home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
-                    away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
-                    total_score = home_score + away_score
-                    status = None
-                    profit = 0.0
-                    pick_lower = pick_str.lower()
-                    is_total = ("total" in bet_type or "over" in pick_lower or "under" in pick_lower or "o/u" in pick_lower)
-
-                    if is_total:
-                        num_match = re.search(r'(?:over|under|o/u|u|o)?\s*([0-9]+\.?[0-9]*)', pick_lower)
-                        if num_match:
-                            total_line = float(num_match.group(1))
-                            is_over = bool(re.search(r'\b(over|o)\b', pick_lower)) or "over" in pick_lower
-                            is_under = bool(re.search(r'\b(under|u)\b', pick_lower))
-                            if total_score == total_line: status = "PUSH"
-                            elif (is_over and total_score > total_line) or (is_under and total_score < total_line): status = "WIN"
+                    home_team, away_team = match.get("home_team", ""), match.get("away_team", "")
+                    
+                    if match_canonical_team(home_team) in game_title or match_canonical_team(away_team) in game_title:
+                        scores = match.get("scores")
+                        if not scores or len(scores) < 2: continue
+                        home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
+                        away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
+                        total_score = home_score + away_score
+                        
+                        status = "PENDING"
+                        
+                        if "moneyline" in bet_type or "h2h" in bet_type:
+                            winner = home_team if home_score > away_score else away_team
+                            status = "WIN" if match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() else "LOSS"
+                            
+                        elif "spread" in bet_type or "run line" in bet_type:
+                            spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str) or re.search(r'([-+]\s*\d+\.?\d*)', bet_type)
+                            spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
+                            
+                            clean_pick_team = re.sub(r'[-+]\s*\d+\.?\d*', '', pick_str).strip()
+                            is_home = match_canonical_team(clean_pick_team).lower() == match_canonical_team(home_team).lower()
+                            
+                            diff = (home_score + spread_val) - away_score if is_home else (away_score + spread_val) - home_score
+                            if diff == 0: status = "PUSH"
+                            elif diff > 0: status = "WIN"
                             else: status = "LOSS"
-                    elif "spread" in bet_type or "run line" in bet_type or re.search(r'[-+]\d+\.?\d*', pick_str):
-                        spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str)
-                        spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
-                        is_home_pick = (home_canonical.lower() in pick_lower or home_team.lower() in pick_lower)
-                        pick_score = home_score if is_home_pick else away_score
-                        opp_score = away_score if is_home_pick else home_score
-                        diff = (pick_score + spread_val) - opp_score
-                        if diff == 0: status = "PUSH"
-                        elif diff > 0: status = "WIN"
-                        else: status = "LOSS"
-                    else:
-                        winner = home_team if home_score > away_score else away_team
-                        is_win = (match_canonical_team(pick_str).lower() == match_canonical_team(winner).lower() or pick_lower in winner.lower() or winner.lower() in pick_lower)
-                        status = "WIN" if is_win else "LOSS"
+                            
+                        elif "total" in bet_type or "over" in bet_type or "under" in bet_type or "over" in pick_str.lower() or "under" in pick_str.lower():
+                            num_match = re.search(r'([0-9]+\.?[0-9]*)', pick_str) or re.search(r'([0-9]+\.?[0-9]*)', bet_type)
+                            line_val = float(num_match.group(1)) if num_match else 0.0
+                            is_over = "over" in pick_str.lower() or "over" in bet_type
+                            
+                            if total_score == line_val: status = "PUSH"
+                            elif (is_over and total_score > line_val) or (not is_over and total_score < line_val): status = "WIN"
+                            else: status = "LOSS"
 
-                    if status == "WIN":
-                        if odds < 0: profit = (100.0 / abs(odds)) * 100.0 * units
-                        else: profit = (odds / 100.0) * 100.0 * units
-                    elif status == "LOSS": profit = -100.0 * units
-                    elif status == "PUSH": profit = 0.0
-
-                    updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
-                    break
-
+                        if status in ["WIN", "LOSS", "PUSH"]:
+                            profit = 0.0
+                            if status == "WIN":
+                                profit = ((odds / 100.0) * 100.0 * units) if odds > 0 else ((100.0 / abs(odds)) * 100.0 * units)
+                            elif status == "LOSS":
+                                profit = -100.0 * units
+                            updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
+                        break
+            except Exception as row_err:
+                print(f"Error grading row {row_idx}: {row_err}")
+                continue
+        
         if updates:
             sheet.batch_update(updates)
-            return len(updates)
+            print(f"Successfully auto-graded {len(updates)} pending bet(s).")
+        return len(updates)
     except Exception as e:
-        print(f"Auto-grade notice: {e}")
-    return 0
+        print(f"Auto-grade batch notice: {e}")
+        return 0
 
 # --- 5. SCOREBOARD ENGINE ---
 def update_scoreboard(spreadsheet):
@@ -527,7 +515,7 @@ def update_memory_from_sheet(sheet, memory):
                 reasoning = str(r[reason_idx]).lower()
                 if status in ["WIN", "LOSS"]:
                     for factor_key, kws in keywords_map.items():
-                        if any(kw in reasoning for kw in kws):
+                        if any(kw in reasoning for factor_key in kws):
                             if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
                             if status == "WIN": factors[factor_key]["wins"] += 1
                             else: factors[factor_key]["losses"] += 1
@@ -545,8 +533,7 @@ def update_memory_from_sheet(sheet, memory):
             memory["net_profit_dollars"] = round(sum(float(r[pl_idx] or 0.0) for r in rows[1:] if len(r) > pl_idx and r[pl_idx]), 2)
         
         with open("og_memory.json", "w") as f: json.dump(memory, f, indent=2)
-    except Exception as e:
-        print(f"Memory update notice: {e}")
+    except Exception: pass
     return memory
 
 # --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAILS ---
@@ -565,9 +552,9 @@ def check_for_hallucinated_pitchers(game_str, reasoning_str, probable_pitchers):
         if len(parts) != 2: return True
         away_canonical, home_canonical = match_canonical_team(parts[0].strip()), match_canonical_team(parts[1].strip())
         
-        for team, pitcher_info in probable_pitchers.items():
+        for team, pitcher_name in probable_pitchers.items():
             if team == home_canonical or team == away_canonical: continue
-            foreign_pitcher_name = pitcher_info.split("(")[0].strip()
+            foreign_pitcher_name = pitcher_name.split("(")[0].strip()
             if foreign_pitcher_name and foreign_pitcher_name.upper() != "TBD" and len(foreign_pitcher_name) > 4:
                 if foreign_pitcher_name in reasoning_str:
                     print(f"  [GUARDRAIL TRIGGERED] Cross-wire detected! {foreign_pitcher_name} does not pitch in {game_str}.")
@@ -605,7 +592,6 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
             dropped_tbd.append(f"{away} @ {home}")
             continue
 
-        # Extract market odds for vig-free probability anchor
         home_odds_val, away_odds_val = -110, -110
         bookmakers = game.get("bookmakers", [])
         if bookmakers:
@@ -622,16 +608,17 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings):
         
         market_home_prob, market_away_prob = get_vig_free_probs(home_odds_val, away_odds_val)
             
+        away_bp_str = objective_fatigue_ratings.get(away, {}).get("status_string", "Status: FRESH | Load Index: 0.0")
+        home_bp_str = objective_fatigue_ratings.get(home, {}).get("status_string", "Status: FRESH | Load Index: 0.0")
+
         game_copy = dict(game)
         game_copy["matchup_context"] = {
             "start_time": game_time_et,
-            "away": f"{away} | Starter: {a_pitcher} | Market Base Prob: {round(market_away_prob*100, 1)}% | Bullpen: {objective_fatigue_ratings.get(away, 'Fresh')}",
-            "home": f"{home} | Starter: {h_pitcher} | Market Base Prob: {round(market_home_prob*100, 1)}% | Bullpen: {objective_fatigue_ratings.get(home, 'Fresh')}"
+            "away": f"{away} | Starter: {a_pitcher} | Market Base Prob: {round(market_away_prob*100, 1)}% | Bullpen: {away_bp_str}",
+            "home": f"{home} | Starter: {h_pitcher} | Market Base Prob: {round(market_home_prob*100, 1)}% | Bullpen: {home_bp_str}"
         }
         valid.append(game_copy)
         
-    if dropped_tbd: print(f"  [Python Guardrail] Dropped {len(dropped_tbd)} game(s) due to TBD starters.")
-    if dropped_live: print(f"  [Temporal Guardrail] Dropped {len(dropped_live)} live/in-play game(s).")
     return valid
 
 # --- 8. GEMINI PRO REASONING & SYNTHESIS ---
@@ -680,6 +667,10 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     4. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
     5. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
     6. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
+    7. TOTALS REQUIREMENT: All recommended Over/Under Totals MUST possess an Expected Value of 12.0% or higher. Do not output borderline totals.
+    8. NO SPREAD/TOTAL COMBOS: Never pick parlay-style outcomes. Stick to single-market Moneyline, Run Line, or Total selections.
+    9. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
+    10. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field. Never accidentally output the wrong team.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -713,26 +704,19 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     }}
     """
 
-    candidate_models = [
-        "gemini-3.1-pro-preview", 
-        "gemini-3.7-flash"        
-    ]
+    candidate_models = ["gemini-3.1-pro-preview", "gemini-3.7-flash"]
 
     for model_name in candidate_models:
         for attempt in range(2):
             try:
-                print(f"Attempting synthesis with model: {model_name} (Attempt {attempt+1})...")
                 response = client.models.generate_content(model=model_name, contents=prompt)
                 parsed = parse_json_from_response(response)
                 if parsed and ("new_picks" in parsed or "validations" in parsed):
-                    print(f"Success! Model {model_name} generated valid JSON output.")
                     return parsed
             except errors.ClientError as e:
-                print(f"ClientError on {model_name}: {e}")
                 if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e): time.sleep(10)
                 else: break
-            except Exception as e:
-                print(f"Unexpected error on {model_name}: {e}")
+            except Exception:
                 break
     return {"validations": [], "new_picks": []}
 
@@ -755,15 +739,12 @@ def main():
     update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
 
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
-    print(f"Fetched {len(probable_pitchers)} probable starting pitcher(s).")
     
-    fatigue_data = fetch_recent_bullpen_usage(days_back=2)
+    # Using the new, accurate, normalized bullpen load metric
+    fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
+    
     odds = fetch_mlb_odds(odds_key)
-    print(f"Fetched {len(odds)} game(s) from The Odds API.")
-    
-    if not odds:
-        print("WARNING: No odds returned from API.")
-        return
+    if not odds: return
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
@@ -772,11 +753,8 @@ def main():
     new_picks = ai_response.get("new_picks", [])
     
     if validations:
-        print(f"Processing {len(validations)} pick validation(s)...")
         for val in validations:
-            if not isinstance(val, dict):
-                print(f"  [Warning] Skipping malformed validation: {val}")
-                continue
+            if not isinstance(val, dict): continue
 
             row_idx = val.get("row_index")
             action = str(val.get("action", "")).strip().upper()
@@ -803,9 +781,6 @@ def main():
                     if reason: sheet.update_cell(row_idx, 13, reason)
                     sheet.update_cell(row_idx, 2, current_time_str)
 
-                print(f"Row {row_idx} evaluated as {action}.")
-
-    # Deduplication map at market level (e.g., "Away @ Home | moneyline")
     existing_rows = sheet.get_all_values()
     existing_market_signatures = set()
     if len(existing_rows) > 1:
@@ -815,12 +790,9 @@ def main():
                 market_sig = normalize_market_type(r[3])
                 existing_market_signatures.add(f"{game_sig} | {market_sig}")
 
-    # Python-level Top-5 Cap sorted by EV
     def parse_ev(item):
-        try:
-            return float(str(item.get("expected_value", "0")).replace("%", "").replace("+", "").strip())
-        except Exception:
-            return 0.0
+        try: return float(str(item.get("expected_value", "0")).replace("%", "").replace("+", "").strip())
+        except Exception: return 0.0
 
     valid_new_picks = []
     for p in new_picks:
@@ -830,20 +802,19 @@ def main():
         market_norm = normalize_market_type(bet_type)
         market_signature = f"{game} | {market_norm}"
         reasoning = str(p.get("reasoning", "")).strip()
+        ev_val = parse_ev(p)
 
-        if market_signature in existing_market_signatures:
-            print(f"Skipping duplicate market play: {market_signature}")
-            continue
+        if market_signature in existing_market_signatures: continue
+        if not check_for_hallucinated_pitchers(game, reasoning, probable_pitchers): continue
 
-        if not check_for_hallucinated_pitchers(game, reasoning, probable_pitchers):
-            continue
+        # Hard Python Guardrail: Filter Totals under 12.0% EV
+        if market_norm == "total" and ev_val < 12.0: continue
 
         valid_new_picks.append(p)
 
     # Strictly take top 5 highest EV picks
     top_5_picks = sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]
     
-    appended = 0
     for p in top_5_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
         start_time_out = str(p.get("start_time", "")).strip()
@@ -866,9 +837,6 @@ def main():
         ], value_input_option="USER_ENTERED")
         
         existing_market_signatures.add(f"{game} | {normalize_market_type(bet_type)}")
-        appended += 1
-            
-    print(f"Execution complete! Added {appended} new pick(s) (Capped at Top 5).")
 
 if __name__ == "__main__":
     main()
