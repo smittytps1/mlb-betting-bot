@@ -135,7 +135,6 @@ def calculate_total_prob(lam_total, line, is_over=True):
         elif not is_over and total_runs < numeric_line: prob_exact += p
     
     # HARD COMPRESSION: Keep calculated probabilities grounded to realistic MLB variance
-    # Cap total cover probabilities between 40% and 59% max.
     return max(0.40, min(0.59, prob_exact))
 
 def get_sheets():
@@ -319,7 +318,9 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
     teams_map = get_mlb_teams_map()
     today = datetime.now(ZoneInfo("America/New_York")).date()
     headers = {"User-Agent": "Mozilla/5.0"}
-    team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0, "high_lev_used": False} for name in teams_map.values()}
+    
+    # Track dates per specific high-leverage pitcher to avoid false-positive B2B
+    team_stats = {name: {"appearances": 0, "total_pitches": 0, "bp_dates": set(), "schedule_games_7d": 0, "high_lev_pitcher_dates": {}} for name in teams_map.values()}
     
     leverage_weights = fetch_high_leverage_relievers(teams_map)
 
@@ -358,8 +359,11 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                             
                             weight = leverage_weights.get(pid, 1.0)
                             game_relief_pitches += (raw_pitches * weight)
+                            
                             if weight >= 1.5:
-                                team_stats[canonical]["high_lev_used"] = True
+                                if pid not in team_stats[canonical]["high_lev_pitcher_dates"]:
+                                    team_stats[canonical]["high_lev_pitcher_dates"][pid] = set()
+                                team_stats[canonical]["high_lev_pitcher_dates"][pid].add(target_date)
                                 
                         if game_relief_pitches > 0:
                             team_stats[canonical]["total_pitches"] += game_relief_pitches
@@ -378,10 +382,12 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
         else:
             status = "FRESH"
             
+        has_b2b_high_lev = any(len(dates) >= 2 for dates in stats["high_lev_pitcher_dates"].values())
+            
         objective_ratings[team] = {
             "status_string": f"Status: {status} | Load Index: {load} | Relief Apps: {stats['appearances']} | Weighted Pitches (2 Days): {total_p} | Games Played (Last 7 Days): {stats['schedule_games_7d']}",
             "load": load,
-            "closer_b2b": stats["high_lev_used"] and len(stats["bp_dates"]) >= 2
+            "closer_b2b": has_b2b_high_lev
         }
     return objective_ratings
 
@@ -595,11 +601,9 @@ def auto_grade_pending_bets(sheet, odds_key):
                             
                         # 2. Spread / Run Line
                         elif "spread" in bet_type or "run line" in bet_type:
-                            # Extract spread from pick_str first, then fallback to bet_type
                             spread_match = re.search(r'([-+]\s*\d+\.?\d*)', pick_str) or re.search(r'([-+]\s*\d+\.?\d*)', bet_type)
                             spread_val = float(spread_match.group(1).replace(" ", "")) if spread_match else 0.0
                             
-                            # Clean team name by stripping out any spread numbers
                             clean_pick_team = re.sub(r'[-+]\s*\d+\.?\d*', '', pick_str).strip()
                             is_home = match_canonical_team(clean_pick_team).lower() == match_canonical_team(home_team).lower()
                             
@@ -669,11 +673,9 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         h_pitcher_info = probable_pitchers.get(home)
         a_pitcher_info = probable_pitchers.get(away)
         
-        # Discard game if either starting pitcher is unconfirmed / TBD
         if not h_pitcher_info or not a_pitcher_info or not h_pitcher_info.get("name") or not a_pitcher_info.get("name"):
             continue
 
-        # Extract market odds to use as baseline anchor
         home_odds_val = -110
         away_odds_val = -110
         bookmakers = game.get("bookmakers", [])
@@ -692,9 +694,6 @@ def format_matchups(odds_data, probable_pitchers, objective_fatigue_ratings, adv
         market_home_prob, market_away_prob = get_vig_free_probs(home_odds_val, away_odds_val)
 
         home_prob, away_prob, projected_total, math_log = calculate_strict_baseline(away, home, a_pitcher_info, h_pitcher_info, objective_fatigue_ratings, advanced_metrics, memory, market_home_prob)
-        
-        home_rl_cover = calculate_runline_prob(projected_total * home_prob, projected_total * away_prob)
-        away_rl_cover = calculate_runline_prob(projected_total * away_prob, projected_total * home_prob)
         
         default_bp = {"status_string": "Status: FRESH | Load Index: 0.0"}
         away_bp_str = objective_fatigue_ratings.get(away, default_bp).get('status_string', "")
@@ -747,6 +746,7 @@ def generate_mlb_picks(formatted_games, open_picks, memory, past_learnings_text)
     8. REASONING REQUIREMENT: Ground reasoning strictly on confirmed pitcher names and metrics provided in the JSON payload. Dive straight into the analysis without any introductory filler phrase.
     9. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
     10. TOTALS PROBABILITY COMPRESSION: MLB run distributions have massive variance. NEVER project a Model Probability higher than 58.0% for any Over/Under Total. If the EV is strong, cap your model_prob at 57% or 58%.
+    11. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field. Never accidentally output the wrong team.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -834,7 +834,6 @@ def main():
         market_norm = normalize_market_type(bet_type_label)
         market_signature = f"{game} | {market_norm}"
         
-        # Hard Python Guardrail: Filter Totals under 12.0% EV
         try:
             ev_val = float(str(p.get("expected_value", "0")).replace("%", "").replace("+", "").strip())
         except:
