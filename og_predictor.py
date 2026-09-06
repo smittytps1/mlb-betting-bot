@@ -462,12 +462,12 @@ def load_memory():
         "total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0,
         "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
         "reasoning_factor_weights": {
-            "starting_pitcher_expected_metrics": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
-            "platoon_and_lineup_splits": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
-            "statcast_contact_quality": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
-            "multi_source_consensus_and_divergence": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence."},
-            "bullpen_depth_and_fatigue": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
-            "umpire_and_situational_fatigue": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
+            "starting_pitcher_expected_metrics": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
+            "platoon_and_lineup_splits": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
+            "statcast_contact_quality": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
+            "multi_source_consensus_and_divergence": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence."},
+            "bullpen_depth_and_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
+            "umpire_and_situational_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
         }
     }
     with open("og_memory.json", "w") as f:
@@ -479,9 +479,9 @@ def calculate_factor_weight(wins, losses, net_profit):
     if total < 3: return 1.0, "Baseline sample size."
     
     if net_profit > 15.0:
-        return min(1.5, round(1.0 + (net_profit / 200.0), 2)), f"Profitable trend (+${round(net_profit, 2)}). Prioritize."
+        return min(1.5, round(1.0 + (net_profit / 1000.0), 2)), f"Profitable trend (+${round(net_profit, 2)}). Prioritize."
     elif net_profit < -15.0:
-        return max(0.5, round(1.0 + (net_profit / 200.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
+        return max(0.5, round(1.0 + (net_profit / 1000.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
     else:
         return 1.0, f"Neutral return (${round(net_profit, 2)})."
 
@@ -491,18 +491,33 @@ def update_memory_from_sheet(sheet, memory):
         if len(rows) <= 1: return memory
 
         headers = [h.strip() for h in rows[0]]
+        date_idx = headers.index("Date") if "Date" in headers else 0
         status_idx = headers.index("Status") if "Status" in headers else 10
         pl_idx = headers.index("P/L ($)") if "P/L ($)" in headers else 11
         reason_idx = headers.index("Reasoning") if "Reasoning" in headers else 12
 
-        wins = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "WIN")
-        losses = sum(1 for r in rows[1:] if len(r) > status_idx and str(r[status_idx]).strip().upper() == "LOSS")
-        total = wins + losses
+        graded_rows = []
+        for r in rows[1:]:
+            if len(r) > max(status_idx, reason_idx, date_idx):
+                row_date = str(r[date_idx]).strip()
+                if row_date <= "2026-08-23":
+                    continue
+                
+                status = str(r[status_idx]).strip().upper()
+                if status in ["WIN", "LOSS"]:
+                    graded_rows.append(r)
+
+        graded_rows.reverse()
+
+        total = len(graded_rows)
+        wins_total = 0.0
+        losses_total = 0.0
+        net_profit_total = 0.0
 
         factors = memory.get("reasoning_factor_weights", {})
         for key in factors:
-            factors[key]["wins"] = 0
-            factors[key]["losses"] = 0
+            factors[key]["wins"] = 0.0
+            factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
         keywords_map = {
@@ -513,24 +528,35 @@ def update_memory_from_sheet(sheet, memory):
             "umpire_and_situational_fatigue": ["umpire", "strike zone", "getaway day", "travel", "time", "home", "road", "park factor", "altitude", "weather"]
         }
 
-        for r in rows[1:]:
-            if len(r) > max(status_idx, reason_idx):
-                status = str(r[status_idx]).strip().upper()
-                reasoning = str(r[reason_idx]).lower()
-                try: profit_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
-                except: profit_val = 0.0
+        for i, r in enumerate(graded_rows):
+            status = str(r[status_idx]).strip().upper()
+            reasoning = str(r[reason_idx]).lower()
+            try: profit_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
+            except: profit_val = 0.0
 
-                if status in ["WIN", "LOSS"]:
-                    for factor_key, kws in keywords_map.items():
-                        if any(kw in reasoning for kw in kws):
-                            if factor_key not in factors: 
-                                factors[factor_key] = {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": ""}
-                            if status == "WIN": 
-                                factors[factor_key]["wins"] += 1
-                                factors[factor_key]["net_profit"] += profit_val
-                            else: 
-                                factors[factor_key]["losses"] += 1
-                                factors[factor_key]["net_profit"] += profit_val
+            decay_weight = 1.0
+            if i >= 50:
+                # Force the exponent to step up only every 5 games
+                exponent = ((i - 50) // 5) + 1
+                decay_weight = 0.95 ** exponent
+
+            if status == "WIN":
+                wins_total += decay_weight
+            else:
+                losses_total += decay_weight
+            
+            net_profit_total += (profit_val * decay_weight)
+
+            for factor_key, kws in keywords_map.items():
+                if any(kw in reasoning for kw in kws):
+                    if factor_key not in factors: 
+                        factors[factor_key] = {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": ""}
+                    if status == "WIN": 
+                        factors[factor_key]["wins"] += decay_weight
+                        factors[factor_key]["net_profit"] += (profit_val * decay_weight)
+                    else: 
+                        factors[factor_key]["losses"] += decay_weight
+                        factors[factor_key]["net_profit"] += (profit_val * decay_weight)
 
         for factor_key, data in factors.items():
             w_val, inst = calculate_factor_weight(data["wins"], data["losses"], data.get("net_profit", 0.0))
@@ -539,10 +565,10 @@ def update_memory_from_sheet(sheet, memory):
 
         if total > 0:
             memory["total_bets"] = total
-            memory["wins"] = wins
-            memory["losses"] = losses
-            memory["win_rate"] = f"{round((wins / total) * 100, 1)}%"
-            memory["net_profit_dollars"] = round(sum(float(r[pl_idx] or 0.0) for r in rows[1:] if len(r) > pl_idx and r[pl_idx]), 2)
+            memory["wins"] = round(wins_total, 2)
+            memory["losses"] = round(losses_total, 2)
+            memory["win_rate"] = f"{round((wins_total / (wins_total + losses_total)) * 100, 1)}%"
+            memory["net_profit_dollars"] = round(net_profit_total, 2)
         
         with open("og_memory.json", "w") as f: json.dump(memory, f, indent=2)
     except Exception: pass
