@@ -462,25 +462,28 @@ def load_memory():
         "total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0,
         "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
         "reasoning_factor_weights": {
-            "starting_pitcher_expected_metrics": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
-            "platoon_and_lineup_splits": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
-            "statcast_contact_quality": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
-            "multi_source_consensus_and_divergence": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate model divergence."},
-            "bullpen_depth_and_fatigue": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
-            "umpire_and_situational_fatigue": {"wins": 0, "losses": 0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
+            "starting_pitcher_expected_metrics": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
+            "platoon_and_lineup_splits": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
+            "statcast_contact_quality": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
+            "multi_source_consensus_and_divergence": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence."},
+            "bullpen_depth_and_fatigue": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
+            "umpire_and_situational_fatigue": {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
         }
     }
     with open("og_memory.json", "w") as f:
         json.dump(default_memory, f, indent=2)
     return default_memory
 
-def calculate_factor_weight(wins, losses):
+def calculate_factor_weight(wins, losses, net_profit):
     total = wins + losses
     if total < 3: return 1.0, "Baseline sample size."
-    win_rate = wins / total
-    if win_rate >= 0.65: return min(1.5, round(1.0 + (win_rate - 0.5) * 1.0, 2)), f"High win rate ({round(win_rate*100, 1)}%). Prioritize this factor."
-    elif win_rate <= 0.40: return max(0.3, round(1.0 - (0.5 - win_rate) * 1.2, 2)), f"Cold streak ({round(win_rate*100, 1)}%). De-emphasize."
-    else: return 1.0, f"Neutral performance ({round(win_rate*100, 1)}%)."
+    
+    if net_profit > 15.0:
+        return min(1.5, round(1.0 + (net_profit / 200.0), 2)), f"Profitable trend (+${round(net_profit, 2)}). Prioritize."
+    elif net_profit < -15.0:
+        return max(0.5, round(1.0 + (net_profit / 200.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
+    else:
+        return 1.0, f"Neutral return (${round(net_profit, 2)})."
 
 def update_memory_from_sheet(sheet, memory):
     try:
@@ -500,28 +503,37 @@ def update_memory_from_sheet(sheet, memory):
         for key in factors:
             factors[key]["wins"] = 0
             factors[key]["losses"] = 0
+            factors[key]["net_profit"] = 0.0
 
         keywords_map = {
-            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip"],
-            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup"],
+            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "sp", "starter", "pitcher", "rotational", "rotation", "mismatch"],
+            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup", "bats", "offense", "split", "contact"],
             "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg"],
-            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "backend", "load"],
-            "umpire_and_situational_fatigue": ["umpire", "strike zone", "getaway day", "travel", "time"]
+            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "backend", "load", "fatigue", "rested", "exhausted", "taxed", "relief"],
+            "umpire_and_situational_fatigue": ["umpire", "strike zone", "getaway day", "travel", "time", "home", "road", "park factor", "altitude", "weather"]
         }
 
         for r in rows[1:]:
             if len(r) > max(status_idx, reason_idx):
                 status = str(r[status_idx]).strip().upper()
                 reasoning = str(r[reason_idx]).lower()
+                try: profit_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
+                except: profit_val = 0.0
+
                 if status in ["WIN", "LOSS"]:
                     for factor_key, kws in keywords_map.items():
-                        if any(kw in reasoning for factor_key in kws):
-                            if factor_key not in factors: factors[factor_key] = {"wins": 0, "losses": 0, "weight": 1.0, "instruction": ""}
-                            if status == "WIN": factors[factor_key]["wins"] += 1
-                            else: factors[factor_key]["losses"] += 1
+                        if any(kw in reasoning for kw in kws):
+                            if factor_key not in factors: 
+                                factors[factor_key] = {"wins": 0, "losses": 0, "net_profit": 0.0, "weight": 1.0, "instruction": ""}
+                            if status == "WIN": 
+                                factors[factor_key]["wins"] += 1
+                                factors[factor_key]["net_profit"] += profit_val
+                            else: 
+                                factors[factor_key]["losses"] += 1
+                                factors[factor_key]["net_profit"] += profit_val
 
         for factor_key, data in factors.items():
-            w_val, inst = calculate_factor_weight(data["wins"], data["losses"])
+            w_val, inst = calculate_factor_weight(data["wins"], data["losses"], data.get("net_profit", 0.0))
             data["weight"] = w_val
             data["instruction"] = inst
 
@@ -674,6 +686,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
+      "evolution_learning_note": "Write a dynamic 2-sentence meta-analysis of recent performance identifying factors that are outperforming or underperforming to guide future runs.",
       "validations": [
         {{
           "row_index": <int matching row_index in open_picks>,
@@ -735,12 +748,10 @@ def main():
     
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
-    
-    update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
 
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     
-    # Using the new, accurate, normalized bullpen load metric
+    # Using the accurate, normalized bullpen load metric
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
     odds = fetch_mlb_odds(odds_key)
@@ -748,6 +759,15 @@ def main():
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
+    
+    # Extract the AI's learning note and explicitly save it to memory before logging
+    learning_note = ai_response.get("evolution_learning_note", "Maintain balanced quantitative multi-factor evaluation.")
+    updated_memory["learnings_and_adjustments"] = learning_note
+    
+    with open("og_memory.json", "w") as f: 
+        json.dump(updated_memory, f, indent=2)
+
+    update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
     
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
@@ -807,12 +827,10 @@ def main():
         if market_signature in existing_market_signatures: continue
         if not check_for_hallucinated_pitchers(game, reasoning, probable_pitchers): continue
 
-        # Hard Python Guardrail: Filter Totals under 12.0% EV
         if market_norm == "total" and ev_val < 12.0: continue
 
         valid_new_picks.append(p)
 
-    # Strictly take top 5 highest EV picks
     top_5_picks = sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]
     
     for p in top_5_picks:
