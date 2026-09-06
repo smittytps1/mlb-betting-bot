@@ -1,46 +1,52 @@
 {
-  "total_bets": 69,
-  "wins": 32,
-  "losses": 37,
-  "win_rate": "46.4%",
-  "net_profit_dollars": -56.29,
-  "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
+  "total_bets": 74,
+  "wins": 35,
+  "losses": 39,
+  "win_rate": "47.3%",
+  "net_profit_dollars": 87.94,
+  "learnings_and_adjustments": "Platoon and lineup splits are heavily driving profitable opportunities (+$250.77 net return), leading us to aggressively target positive platoon mismatches. Conversely, expected starting pitcher metrics and baseline bullpen fatigue factors have underperformed and are systematically de-emphasized to prevent value traps.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 1,
-      "losses": 2,
-      "weight": 0.8,
-      "instruction": "Cold streak (33.3%). De-emphasize."
+      "wins": 8,
+      "losses": 20,
+      "weight": 0.5,
+      "instruction": "Negative return ($-1060.96). De-emphasize.",
+      "net_profit": -1060.9599999999998
     },
     "platoon_and_lineup_splits": {
-      "wins": 5,
-      "losses": 6,
-      "weight": 1.0,
-      "instruction": "Neutral performance (45.5%)."
+      "wins": 9,
+      "losses": 8,
+      "weight": 1.5,
+      "instruction": "Profitable trend (+$250.77). Prioritize.",
+      "net_profit": 250.77000000000004
     },
     "statcast_contact_quality": {
       "wins": 0,
       "losses": 0,
       "weight": 1.0,
-      "instruction": "Baseline sample size."
+      "instruction": "Baseline sample size.",
+      "net_profit": 0.0
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0,
       "losses": 0,
       "weight": 1.0,
-      "instruction": "Baseline sample size."
+      "instruction": "Baseline sample size.",
+      "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 18,
-      "losses": 28,
-      "weight": 0.87,
-      "instruction": "Cold streak (39.1%). De-emphasize."
+      "wins": 22,
+      "losses": 32,
+      "weight": 0.5,
+      "instruction": "Negative return ($-950.06). De-emphasize.",
+      "net_profit": -950.06
     },
     "umpire_and_situational_fatigue": {
-      "wins": 0,
-      "losses": 0,
-      "weight": 1.0,
-      "instruction": "Baseline sample size."
+      "wins": 4,
+      "losses": 5,
+      "weight": 0.75,
+      "instruction": "Negative return ($-49.72). De-emphasize.",
+      "net_profit": -49.71999999999997
     }
   }
 }
