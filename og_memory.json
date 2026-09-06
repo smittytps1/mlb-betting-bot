@@ -4,7 +4,7 @@
   "losses": 39,
   "win_rate": "47.3%",
   "net_profit_dollars": 87.94,
-  "learnings_and_adjustments": "Platoon and lineup splits are heavily driving profitable opportunities (+$250.77 net return), leading us to aggressively target positive platoon mismatches. Conversely, expected starting pitcher metrics and baseline bullpen fatigue factors have underperformed and are systematically de-emphasized to prevent value traps.",
+  "learnings_and_adjustments": "Lineup splits and platoon advantages continue to drive highly profitable returns, outperforming baseline expectations. Conversely, overvaluing starting pitcher expected metrics and bullpen depth has led to negative yields, prompting a strategic recalibration to de-emphasize these traditional factors in current models.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 8,
