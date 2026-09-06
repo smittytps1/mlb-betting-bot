@@ -1,52 +1,52 @@
 {
-  "total_bets": 74,
-  "wins": 35,
-  "losses": 39,
-  "win_rate": "47.3%",
-  "net_profit_dollars": 87.94,
-  "learnings_and_adjustments": "Lineup splits and platoon advantages continue to drive highly profitable returns, outperforming baseline expectations. Conversely, overvaluing starting pitcher expected metrics and bullpen depth has led to negative yields, prompting a strategic recalibration to de-emphasize these traditional factors in current models.",
+  "total_bets": 54,
+  "wins": 23.9,
+  "losses": 29.9,
+  "win_rate": "44.4%",
+  "net_profit_dollars": 67.48,
+  "learnings_and_adjustments": "Recent runs show significant negative returns when over-weighting starting pitcher metrics and bullpen fatigue, indicating the market is already efficiently pricing or overvaluing these traditional anchors. Platoon and lineup splits continue to generate positive ROI, prompting a strategic shift toward underdogs showing favorable situational hitting splits to consistently clear the 11.0% EV threshold.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 8,
-      "losses": 20,
+      "wins": 4.95,
+      "losses": 12.0,
       "weight": 0.5,
-      "instruction": "Negative return ($-1060.96). De-emphasize.",
-      "net_profit": -1060.9599999999998
+      "instruction": "Negative return ($-549.09). De-emphasize.",
+      "net_profit": -549.0875000000001
     },
     "platoon_and_lineup_splits": {
-      "wins": 9,
-      "losses": 8,
-      "weight": 1.5,
-      "instruction": "Profitable trend (+$250.77). Prioritize.",
-      "net_profit": 250.77000000000004
+      "wins": 4.95,
+      "losses": 6.0,
+      "weight": 1.12,
+      "instruction": "Profitable trend (+$115.16). Prioritize.",
+      "net_profit": 115.16249999999997
     },
     "statcast_contact_quality": {
-      "wins": 0,
-      "losses": 0,
+      "wins": 0.0,
+      "losses": 0.0,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
       "net_profit": 0.0
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 0,
-      "losses": 0,
+      "wins": 0.0,
+      "losses": 0.0,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 22,
-      "losses": 32,
+      "wins": 14.899999999999999,
+      "losses": 25.9,
       "weight": 0.5,
-      "instruction": "Negative return ($-950.06). De-emphasize.",
-      "net_profit": -950.06
+      "instruction": "Negative return ($-939.62). De-emphasize.",
+      "net_profit": -939.6174999999998
     },
     "umpire_and_situational_fatigue": {
-      "wins": 4,
-      "losses": 5,
-      "weight": 0.75,
-      "instruction": "Negative return ($-49.72). De-emphasize.",
-      "net_profit": -49.71999999999997
+      "wins": 2.0,
+      "losses": 3.0,
+      "weight": 0.97,
+      "instruction": "Negative return ($-27.76). De-emphasize.",
+      "net_profit": -27.75999999999999
     }
   }
 }
