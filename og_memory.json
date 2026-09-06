@@ -4,7 +4,7 @@
   "losses": 29.9,
   "win_rate": "44.4%",
   "net_profit_dollars": 67.48,
-  "learnings_and_adjustments": "Recent runs show significant negative returns when over-weighting starting pitcher metrics and bullpen fatigue, indicating the market is already efficiently pricing or overvaluing these traditional anchors. Platoon and lineup splits continue to generate positive ROI, prompting a strategic shift toward underdogs showing favorable situational hitting splits to consistently clear the 11.0% EV threshold.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to drive profitable EV (+$115.16), dictating heavily prioritized weighting across all matchups. Conversely, starting pitcher baseline metrics and bullpen depth factors are producing severe negative returns, resulting in their deliberate de-emphasis in probability shifting for the current run.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 4.95,
