@@ -476,12 +476,17 @@ def load_memory():
 
 def calculate_factor_weight(wins, losses, net_profit):
     total = wins + losses
-    if total < 3: return 1.0, "Baseline sample size."
+    if total < 3: 
+        return 1.0, "Baseline sample size."
     
-    if net_profit > 25.0:
-        return min(1.5, round(1.0 + (net_profit / 1000.0), 2)), f"Profitable trend (+${round(net_profit, 2)}). Prioritize."
-    elif net_profit < -50.0:
-        return max(0.75, round(1.0 + (net_profit / 1000.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
+    # Continuous gradient: Bounded safely between a 0.75x floor and a 1.5x ceiling
+    raw_weight = 1.0 + (net_profit / 200.0)
+    bounded_weight = max(0.75, min(1.5, round(raw_weight, 2)))
+    
+    if bounded_weight > 1.0:
+        return bounded_weight, f"Profitable trend (+${round(net_profit, 2)}). Scaled priority."
+    elif bounded_weight < 1.0:
+        return bounded_weight, f"Negative return (${round(net_profit, 2)}). Scaled de-emphasis."
     else:
         return 1.0, f"Neutral return (${round(net_profit, 2)})."
 
@@ -520,7 +525,7 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
-        # Refined, mutually exclusive keyword mapping to prevent multi-trigger overlap
+        # Refined, mutually exclusive keyword mapping
         keywords_map = {
             "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "starting pitcher", "rotation advantage"],
             "platoon_and_lineup_splits": ["wrc+", "ops", "platoon split", "vs lhp", "vs rhp", "lineup advantage", "hitting split"],
@@ -535,6 +540,7 @@ def update_memory_from_sheet(sheet, memory):
             try: profit_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
             except: profit_val = 0.0
 
+            # --- 50-GAME / 5-GAME BATCHED EXPONENTIAL DECAY ---
             decay_weight = 1.0
             if i >= 50:
                 exponent = ((i - 50) // 5) + 1
