@@ -4,7 +4,7 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Statcast contact quality outperformance continues to indicate strong early-inning value, while significantly taxed bullpens (e.g., Baltimore's massive 306.5 Load Index) are generating substantial fade opportunities late in games. Platoon and lineup split data continues to underperform against the mean, necessitating a scaled de-emphasis when prioritizing heavily skewed bullpen fatigue advantages.",
+  "learnings_and_adjustments": "Statcast contact quality (1.4 weight) continues to drastically outperform baseline metrics, highlighting the inefficiency in how markets price middle-tier pitchers with elite underlying exit velocity suppression. Conversely, platoon splits (0.6 weight) and traditional bullpen depth parameters have over-penalized edge cases, requiring a scaled de-emphasis to recalibrate our EV captures.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.0,
