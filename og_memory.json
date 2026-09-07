@@ -4,19 +4,19 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Extreme bullpen load disparities are dominating late-inning outcomes, offering highly profitable fade opportunities against severely taxed relief corps. Starting pitcher expected metrics and platoon splits are currently yielding negative returns, instructing the engine to deprioritize them in favor of situational fatigue and dynamic market divergence.",
+  "learnings_and_adjustments": "Recent runs reveal negative returns across pitcher expected metrics and fatigue factors, necessitating a more conservative, baseline-anchored approach. We will de-emphasize historical platoon splits and situational fatigue, relying instead on pronounced immediate bullpen load discrepancies and vig-free market consensus to isolate high-EV opportunities.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 4.9025,
       "losses": 17.8525,
-      "weight": 0.5,
+      "weight": 0.75,
       "instruction": "Negative return ($-1167.51). De-emphasize.",
       "net_profit": -1167.5051249999997
     },
     "platoon_and_lineup_splits": {
       "wins": 4.9025,
       "losses": 12.9025,
-      "weight": 0.5,
+      "weight": 0.75,
       "instruction": "Negative return ($-641.86). De-emphasize.",
       "net_profit": -641.8551249999999
     },
@@ -37,14 +37,14 @@
     "bullpen_depth_and_fatigue": {
       "wins": 14.754999999999999,
       "losses": 25.364874999999998,
-      "weight": 0.5,
+      "weight": 0.75,
       "instruction": "Negative return ($-884.66). De-emphasize.",
       "net_profit": -884.655875
     },
     "umpire_and_situational_fatigue": {
       "wins": 1.95,
       "losses": 6.0,
-      "weight": 0.61,
+      "weight": 0.75,
       "instruction": "Negative return ($-392.55). De-emphasize.",
       "net_profit": -392.547
     }
