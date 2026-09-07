@@ -474,22 +474,6 @@ def load_memory():
         json.dump(default_memory, f, indent=2)
     return default_memory
 
-def calculate_factor_weight(wins, losses, net_profit):
-    total = wins + losses
-    if total < 3: 
-        return 1.0, "Baseline sample size."
-    
-    # Continuous gradient: Bounded safely between a 0.75x floor and a 1.5x ceiling
-    raw_weight = 1.0 + (net_profit / 200.0)
-    bounded_weight = max(0.75, min(1.5, round(raw_weight, 2)))
-    
-    if bounded_weight > 1.0:
-        return bounded_weight, f"Profitable trend (+${round(net_profit, 2)}). Scaled priority."
-    elif bounded_weight < 1.0:
-        return bounded_weight, f"Negative return (${round(net_profit, 2)}). Scaled de-emphasis."
-    else:
-        return 1.0, f"Neutral return (${round(net_profit, 2)})."
-
 def update_memory_from_sheet(sheet, memory):
     try:
         rows = sheet.get_all_values()
@@ -580,10 +564,38 @@ def update_memory_from_sheet(sheet, memory):
                         factors[factor_key]["losses"] += decay_weight
                         factors[factor_key]["net_profit"] += (profit_val * decay_weight)
 
+        # --- RELATIVE WEIGHTING SYSTEM ---
+        valid_profits = {}
         for factor_key, data in factors.items():
-            w_val, inst = calculate_factor_weight(data["wins"], data["losses"], data.get("net_profit", 0.0))
-            data["weight"] = w_val
-            data["instruction"] = inst
+            t_count = data["wins"] + data["losses"]
+            if t_count >= 3:
+                valid_profits[factor_key] = data["net_profit"]
+
+        if valid_profits:
+            mean_profit = sum(valid_profits.values()) / len(valid_profits)
+            
+            for factor_key, data in factors.items():
+                t_count = data["wins"] + data["losses"]
+                if t_count < 3:
+                    data["weight"] = 1.0
+                    data["instruction"] = "Baseline sample size."
+                    continue
+                
+                net_p = data["net_profit"]
+                # Deviation from group mean, scaled gently to produce smooth fractional spreads
+                deviation = net_p - mean_profit
+                raw_weight = 1.0 + (deviation / 400.0)
+                
+                # Bounded safely between 0.75x and 1.25x
+                bounded_weight = max(0.75, min(1.25, round(raw_weight, 2)))
+                data["weight"] = bounded_weight
+                
+                if bounded_weight > 1.0:
+                    data["instruction"] = f"Outperforming group average (+${round(net_p, 2)} vs mean). Scaled priority."
+                elif bounded_weight < 1.0:
+                    data["instruction"] = f"Underperforming group average (${round(net_p, 2)} vs mean). Scaled de-emphasis."
+                else:
+                    data["instruction"] = f"Neutral relative return (${round(net_p, 2)})."
 
         if total > 0:
             memory["total_bets"] = total
