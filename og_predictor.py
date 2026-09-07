@@ -564,7 +564,7 @@ def update_memory_from_sheet(sheet, memory):
                         factors[factor_key]["losses"] += decay_weight
                         factors[factor_key]["net_profit"] += (profit_val * decay_weight)
 
-        # --- RELATIVE WEIGHTING SYSTEM ---
+        # --- RELATIVE WEIGHTING SYSTEM (TUNED FOR PRECISION) ---
         valid_profits = {}
         for factor_key, data in factors.items():
             t_count = data["wins"] + data["losses"]
@@ -582,12 +582,12 @@ def update_memory_from_sheet(sheet, memory):
                     continue
                 
                 net_p = data["net_profit"]
-                # Deviation from group mean, scaled gently to produce smooth fractional spreads
+                # Deviation from group mean, scaled with a finer divisor (250.0) for smooth decimals
                 deviation = net_p - mean_profit
-                raw_weight = 1.0 + (deviation / 400.0)
+                raw_weight = 1.0 + (deviation / 250.0)
                 
-                # Bounded safely between 0.75x and 1.25x
-                bounded_weight = max(0.75, min(1.25, round(raw_weight, 2)))
+                # Wider safe boundaries (0.60x to 1.40x) to prevent premature clipping
+                bounded_weight = max(0.60, min(1.40, round(raw_weight, 2)))
                 data["weight"] = bounded_weight
                 
                 if bounded_weight > 1.0:
