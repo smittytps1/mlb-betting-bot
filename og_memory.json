@@ -4,14 +4,14 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Statcast contact quality (1.4 weight) continues to drastically outperform baseline metrics, highlighting the inefficiency in how markets price middle-tier pitchers with elite underlying exit velocity suppression. Conversely, platoon splits (0.6 weight) and traditional bullpen depth parameters have over-penalized edge cases, requiring a scaled de-emphasis to recalibrate our EV captures.",
+  "learnings_and_adjustments": "Statcast contact quality and bullpen depth metrics are strongly outperforming the baseline, indicating that late-game reliever fatigue is currently a critical market inefficiency. Conversely, starting pitcher expected metrics and platoon splits are underperforming, warranting their continued scaled de-emphasis in our probability weighting.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 0.0,
-      "losses": 1.95,
-      "weight": 1.0,
-      "instruction": "Baseline sample size.",
-      "net_profit": -153.6
+      "wins": 2.95,
+      "losses": 14.752499999999998,
+      "weight": 0.6,
+      "instruction": "Underperforming group average ($-1294.61 vs mean). Scaled de-emphasis.",
+      "net_profit": -1294.6095
     },
     "platoon_and_lineup_splits": {
       "wins": 2.9025,
@@ -37,8 +37,8 @@
     "bullpen_depth_and_fatigue": {
       "wins": 14.754999999999999,
       "losses": 22.414875,
-      "weight": 0.75,
-      "instruction": "Underperforming group average ($-427.26 vs mean). Scaled de-emphasis.",
+      "weight": 1.4,
+      "instruction": "Outperforming group average (+$-427.26 vs mean). Scaled priority.",
       "net_profit": -427.25587500000006
     },
     "umpire_and_situational_fatigue": {
