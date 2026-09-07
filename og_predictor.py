@@ -478,10 +478,10 @@ def calculate_factor_weight(wins, losses, net_profit):
     total = wins + losses
     if total < 3: return 1.0, "Baseline sample size."
     
-    if net_profit > 15.0:
+    if net_profit > 25.0:
         return min(1.5, round(1.0 + (net_profit / 1000.0), 2)), f"Profitable trend (+${round(net_profit, 2)}). Prioritize."
-    elif net_profit < -15.0:
-        return max(0.5, round(1.0 + (net_profit / 1000.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
+    elif net_profit < -50.0:
+        return max(0.75, round(1.0 + (net_profit / 1000.0), 2)), f"Negative return (${round(net_profit, 2)}). De-emphasize."
     else:
         return 1.0, f"Neutral return (${round(net_profit, 2)})."
 
@@ -536,7 +536,6 @@ def update_memory_from_sheet(sheet, memory):
 
             decay_weight = 1.0
             if i >= 50:
-                # Force the exponent to step up only every 5 games
                 exponent = ((i - 50) // 5) + 1
                 decay_weight = 0.95 ** exponent
 
@@ -857,7 +856,7 @@ def main():
 
         valid_new_picks.append(p)
 
-    top_5_picks = sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]
+    top_5_picks = sorted(valid_new_pins if 'valid_new_pins' in locals() else valid_new_picks, key=parse_ev, reverse=True)[:5]
     
     for p in top_5_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
