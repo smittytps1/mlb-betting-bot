@@ -4,28 +4,28 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Statcast contact quality and bullpen depth metrics are strongly outperforming the baseline, indicating that late-game reliever fatigue is currently a critical market inefficiency. Conversely, starting pitcher expected metrics and platoon splits are underperforming, warranting their continued scaled de-emphasis in our probability weighting.",
+  "learnings_and_adjustments": "Extreme bullpen fatigue metrics continue to expose glaring inefficiencies in market closing lines, particularly when load indices eclipse critical hazard thresholds (>250), outperforming mean expectations by a sizable margin. Conversely, early-game situational splits remain an underperforming factor in recent samples, requiring sustained de-emphasis in the probabilistic scaling matrix.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 2.95,
-      "losses": 14.752499999999998,
-      "weight": 0.6,
-      "instruction": "Underperforming group average ($-1294.61 vs mean). Scaled de-emphasis.",
-      "net_profit": -1294.6095
+      "wins": 0.0,
+      "losses": 0.0,
+      "weight": 1.0,
+      "instruction": "Baseline sample size.",
+      "net_profit": 0.0
     },
     "platoon_and_lineup_splits": {
-      "wins": 2.9025,
-      "losses": 11.9025,
+      "wins": 1.45125,
+      "losses": 9.45125,
       "weight": 0.6,
-      "instruction": "Underperforming group average ($-856.31 vs mean). Scaled de-emphasis.",
-      "net_profit": -856.305125
+      "instruction": "Underperforming group average ($-789.15 vs mean). Scaled de-emphasis.",
+      "net_profit": -789.1525624999999
     },
     "statcast_contact_quality": {
-      "wins": 2.0,
-      "losses": 1.0,
-      "weight": 1.4,
-      "instruction": "Outperforming group average (+$190.45 vs mean). Scaled priority.",
-      "net_profit": 190.45
+      "wins": 1.0,
+      "losses": 0.5,
+      "weight": 1.0,
+      "instruction": "Baseline sample size.",
+      "net_profit": 95.225
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,18 +35,18 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 14.754999999999999,
-      "losses": 22.414875,
+      "wins": 12.303749999999999,
+      "losses": 20.463625,
       "weight": 1.4,
-      "instruction": "Outperforming group average (+$-427.26 vs mean). Scaled priority.",
-      "net_profit": -427.25587500000006
+      "instruction": "Outperforming group average (+$-576.33 vs mean). Scaled priority.",
+      "net_profit": -576.3283124999998
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
-      "losses": 2.0,
+      "losses": 1.0,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": -232.0
+      "net_profit": -116.0
     }
   }
 }
