@@ -1,0 +1,26 @@
+name: Run Factor Weight Diagnostic
+
+on:
+  workflow_dispatch: # This enables the manual "Run workflow" button in GitHub
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install gspread requests
+
+      - name: Run Weight Diagnostic
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python test_weights.py
