@@ -520,12 +520,13 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
+        # Refined, mutually exclusive keyword mapping to prevent multi-trigger overlap
         keywords_map = {
-            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "sp", "starter", "pitcher", "rotational", "rotation", "mismatch"],
-            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon", "vs lhp", "vs rhp", "lineup", "bats", "offense", "split", "contact"],
-            "statcast_contact_quality": ["statcast", "xwoba", "barrel", "hard-hit", "xba", "xslg"],
-            "bullpen_depth_and_fatigue": ["bullpen", "reliever", "leverage", "closer", "backend", "load", "fatigue", "rested", "exhausted", "taxed", "relief"],
-            "umpire_and_situational_fatigue": ["umpire", "strike zone", "getaway day", "travel", "time", "home", "road", "park factor", "altitude", "weather"]
+            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "starting pitcher", "rotation advantage"],
+            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon split", "vs lhp", "vs rhp", "lineup advantage", "hitting split"],
+            "statcast_contact_quality": ["xwoba", "barrel rate", "hard-hit rate", "xba", "xslg", "contact quality"],
+            "bullpen_depth_and_fatigue": ["bullpen load", "relief backend", "closer b2b", "taxed relief", "exhausted bullpen", "relief corps"],
+            "umpire_and_situational_fatigue": ["umpire zone", "getaway day", "travel fatigue", "park factor", "altitude impact", "weather conditions"]
         }
 
         for i, r in enumerate(graded_rows):
@@ -856,7 +857,7 @@ def main():
 
         valid_new_picks.append(p)
 
-    top_5_picks = sorted(valid_new_pins if 'valid_new_pins' in locals() else valid_new_picks, key=parse_ev, reverse=True)[:5]
+    top_5_picks = sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]
     
     for p in top_5_picks:
         pick_date = str(p.get("date", today_date_str)).strip()
