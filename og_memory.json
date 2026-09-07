@@ -4,7 +4,7 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Bullpen fatigue variables and negative return splits are temporarily de-emphasized to stabilize Expected Value scaling against sharp market numbers. The model is currently anchoring heavily on Statcast contact quality combined with starter base probabilities, driving favorable run-line and moneyline projections against taxed pitching staffs.",
+  "learnings_and_adjustments": "Recent historical data highlights a negative return on heavily weighted bullpen fatigue and platoon split models, indicating potential market overcorrection in these areas. Moving forward, the system is scaling down emphasis on these splits while heavily anchoring to statcast contact quality to capture untaxed predictive value.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.0,
@@ -17,7 +17,7 @@
       "wins": 1.9024999999999999,
       "losses": 7.0,
       "weight": 0.75,
-      "instruction": "Negative return ($-406.22). De-emphasize.",
+      "instruction": "Negative return ($-406.22). Scaled de-emphasis.",
       "net_profit": -406.222625
     },
     "statcast_contact_quality": {
@@ -38,7 +38,7 @@
       "wins": 2.0,
       "losses": 5.805,
       "weight": 0.75,
-      "instruction": "Negative return ($-414.59). De-emphasize.",
+      "instruction": "Negative return ($-414.59). Scaled de-emphasis.",
       "net_profit": -414.5875
     },
     "umpire_and_situational_fatigue": {
