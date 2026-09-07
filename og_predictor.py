@@ -525,13 +525,29 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
-        # Refined, mutually exclusive keyword mapping
+        # Upgraded comprehensive keyword map matching actual LLM reasoning phrasing
         keywords_map = {
-            "starting_pitcher_expected_metrics": ["xfip", "siera", "xera", "fip", "csw", "whip", "starting pitcher", "rotation advantage"],
-            "platoon_and_lineup_splits": ["wrc+", "ops", "platoon split", "vs lhp", "vs rhp", "lineup advantage", "hitting split"],
-            "statcast_contact_quality": ["xwoba", "barrel rate", "hard-hit rate", "xba", "xslg", "contact quality"],
-            "bullpen_depth_and_fatigue": ["bullpen load", "relief backend", "closer b2b", "taxed relief", "exhausted bullpen", "relief corps"],
-            "umpire_and_situational_fatigue": ["umpire zone", "getaway day", "travel fatigue", "park factor", "altitude impact", "weather conditions"]
+            "starting_pitcher_expected_metrics": [
+                "starting pitcher", "starter", "rotation", "pitcher profile", 
+                "strikeout upside", "early-game control", "peripheral metrics"
+            ],
+            "platoon_and_lineup_splits": [
+                "platoon", "lineup splits", "hitting splits", "wrc+", 
+                "offensive advantage", "matchup-specific hitting"
+            ],
+            "statcast_contact_quality": [
+                "contact quality", "quality contact", "xwoba", "barrel", 
+                "hard-hit", "peripheral contact"
+            ],
+            "bullpen_depth_and_fatigue": [
+                "bullpen", "reliever", "backend load", "load index", 
+                "closer b2b", "closer burn", "taxed relief", "relief corps", 
+                "fatigue discrepancy", "fresh bullpen"
+            ],
+            "umpire_and_situational_fatigue": [
+                "umpire", "travel", "getaway day", "park factor", 
+                "altitude", "weather", "home underdog"
+            ]
         }
 
         for i, r in enumerate(graded_rows):
