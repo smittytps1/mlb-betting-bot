@@ -4,7 +4,7 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Bullpen depth and fatigue metrics are actively underperforming the broader mean, causing a slight systemic de-emphasis in standard matchups. However, extreme bullpen exhaustion (e.g., Load Index >300) remains a highly predictive fade trigger, particularly when supported by positive Statcast contact quality from the opposing lineup.",
+  "learnings_and_adjustments": "Statcast contact quality outperformance continues to indicate strong early-inning value, while significantly taxed bullpens (e.g., Baltimore's massive 306.5 Load Index) are generating substantial fade opportunities late in games. Platoon and lineup split data continues to underperform against the mean, necessitating a scaled de-emphasis when prioritizing heavily skewed bullpen fatigue advantages.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.0,
@@ -16,14 +16,14 @@
     "platoon_and_lineup_splits": {
       "wins": 2.9025,
       "losses": 11.9025,
-      "weight": 0.75,
+      "weight": 0.6,
       "instruction": "Underperforming group average ($-856.31 vs mean). Scaled de-emphasis.",
       "net_profit": -856.305125
     },
     "statcast_contact_quality": {
       "wins": 2.0,
       "losses": 1.0,
-      "weight": 1.25,
+      "weight": 1.4,
       "instruction": "Outperforming group average (+$190.45 vs mean). Scaled priority.",
       "net_profit": 190.45
     },
@@ -37,7 +37,7 @@
     "bullpen_depth_and_fatigue": {
       "wins": 14.754999999999999,
       "losses": 22.414875,
-      "weight": 0.84,
+      "weight": 0.75,
       "instruction": "Underperforming group average ($-427.26 vs mean). Scaled de-emphasis.",
       "net_profit": -427.25587500000006
     },
