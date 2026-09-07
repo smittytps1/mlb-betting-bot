@@ -1,24 +1,24 @@
 {
-  "total_bets": 54,
-  "wins": 23.9,
-  "losses": 29.9,
-  "win_rate": "44.4%",
-  "net_profit_dollars": 67.48,
-  "learnings_and_adjustments": "Recent negative returns on starting pitcher expected metrics and bullpen fatigue suggest models are over-penalizing pitching staffs in current environments. Conversely, emphasizing platoon and lineup splits is yielding highly profitable returns, dictating a heavy lean toward situational hitting data in this slate.",
+  "total_bets": 61,
+  "wins": 23.75,
+  "losses": 36.36,
+  "win_rate": "39.5%",
+  "net_profit_dollars": -638.56,
+  "learnings_and_adjustments": "Recent negative returns on starting pitcher expected metrics and bullpen fatigue splits suggest market over-adjustments on known rest disadvantages. The engine is shifting emphasis toward baseline contact quality and multi-source consensus while exploiting situational value on highly taxed relief corps.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 4.95,
-      "losses": 12.0,
+      "wins": 4.9025,
+      "losses": 17.8525,
       "weight": 0.5,
-      "instruction": "Negative return ($-549.09). De-emphasize.",
-      "net_profit": -549.0875000000001
+      "instruction": "Negative return ($-1167.51). De-emphasize.",
+      "net_profit": -1167.5051249999997
     },
     "platoon_and_lineup_splits": {
-      "wins": 4.95,
-      "losses": 6.0,
-      "weight": 1.12,
-      "instruction": "Profitable trend (+$115.16). Prioritize.",
-      "net_profit": 115.16249999999997
+      "wins": 4.9025,
+      "losses": 12.9025,
+      "weight": 0.5,
+      "instruction": "Negative return ($-641.86). De-emphasize.",
+      "net_profit": -641.8551249999999
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -35,18 +35,18 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 14.899999999999999,
-      "losses": 25.9,
+      "wins": 14.754999999999999,
+      "losses": 25.364874999999998,
       "weight": 0.5,
-      "instruction": "Negative return ($-939.62). De-emphasize.",
-      "net_profit": -939.6174999999998
+      "instruction": "Negative return ($-884.66). De-emphasize.",
+      "net_profit": -884.655875
     },
     "umpire_and_situational_fatigue": {
-      "wins": 2.0,
-      "losses": 3.0,
-      "weight": 0.97,
-      "instruction": "Negative return ($-27.76). De-emphasize.",
-      "net_profit": -27.75999999999999
+      "wins": 1.95,
+      "losses": 6.0,
+      "weight": 0.61,
+      "instruction": "Negative return ($-392.55). De-emphasize.",
+      "net_profit": -392.547
     }
   }
 }
