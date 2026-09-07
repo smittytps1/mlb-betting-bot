@@ -165,7 +165,7 @@ def update_evolution_log(spreadsheet, sport_label, memory, summary, time_str):
             memory.get("win_rate", "0%"), 
             memory.get("net_profit_dollars", 0.0), 
             weights_str, 
-            memory.get("learnings_and_adjustments", "Maintain balanced quantitative multi-factor evaluation."), 
+            memory.get("learnings_and_adjustments", "Maintain balanced bipolar 100-point multi-factor evaluation."), 
             summary
         ])
     except Exception as e:
@@ -451,7 +451,7 @@ def update_scoreboard(spreadsheet):
     except Exception as e:
         print(f"Scoreboard notice: {e}")
 
-# --- 6. RECURSIVE MEMORY & FACTOR WEIGHTING ---
+# --- 6. RECURSIVE MEMORY & FACTOR WEIGHTING (BIPOLAR 100-POINT FRAMEWORK) ---
 def load_memory():
     if os.path.exists("og_memory.json"):
         try:
@@ -460,14 +460,14 @@ def load_memory():
     
     default_memory = {
         "total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0,
-        "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
+        "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
         "reasoning_factor_weights": {
-            "starting_pitcher_expected_metrics": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate starting pitcher (SP) metrics."},
-            "platoon_and_lineup_splits": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
-            "statcast_contact_quality": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
-            "multi_source_consensus_and_divergence": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence."},
-            "bullpen_depth_and_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Respect season-weighted ratings."},
-            "umpire_and_situational_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate schedule fatigue and game times."}
+            "starting_pitcher_expected_metrics": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate starting pitcher on 0-100 bipolar scale via (sp-metrics)."},
+            "platoon_and_lineup_splits": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits on 0-100 bipolar scale."},
+            "statcast_contact_quality": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit% on 0-100 bipolar scale."},
+            "multi_source_consensus_and_divergence": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence on 0-100 bipolar scale."},
+            "bullpen_depth_and_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate season-weighted bullpen load on 0-100 bipolar scale."},
+            "umpire_and_situational_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate schedule and situational fatigue on 0-100 bipolar scale."}
         }
     }
     with open("og_memory.json", "w") as f:
@@ -509,9 +509,8 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
-        # Keyword map using strict (sp) tag to completely prevent bullpen cross-contamination
         keywords_map = {
-            "starting_pitcher_expected_metrics": ["(sp)"],
+            "starting_pitcher_expected_metrics": ["(sp-metrics)"],
             "platoon_and_lineup_splits": [
                 "platoon", "lineup splits", "hitting splits", "wrc+", 
                 "offensive advantage", "matchup-specific hitting"
@@ -550,16 +549,25 @@ def update_memory_from_sheet(sheet, memory):
             
             net_profit_total += (profit_val * decay_weight)
 
+            # Identify all factors triggered in this reasoning string
+            triggered_factors = []
             for factor_key, kws in keywords_map.items():
                 if any(kw in reasoning for kw in kws):
+                    triggered_factors.append(factor_key)
+
+            # Apply fractional credit splitting so multi-factor bets don't double-count
+            if triggered_factors:
+                fractional_share = 1.0 / len(triggered_factors)
+                for factor_key in triggered_factors:
                     if factor_key not in factors: 
                         factors[factor_key] = {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": ""}
+                    
                     if status == "WIN": 
-                        factors[factor_key]["wins"] += decay_weight
-                        factors[factor_key]["net_profit"] += (profit_val * decay_weight)
+                        factors[factor_key]["wins"] += (decay_weight * fractional_share)
+                        factors[factor_key]["net_profit"] += (profit_val * decay_weight * fractional_share)
                     else: 
-                        factors[factor_key]["losses"] += decay_weight
-                        factors[factor_key]["net_profit"] += (profit_val * decay_weight)
+                        factors[factor_key]["losses"] += (decay_weight * fractional_share)
+                        factors[factor_key]["net_profit"] += (profit_val * decay_weight * fractional_share)
 
         # --- RELATIVE WEIGHTING SYSTEM ---
         valid_profits = {}
@@ -716,7 +724,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
         return {"validations": [], "new_picks": []}
 
     prompt = f"""
-    You are an elite quantitative MLB betting engine executing deep multi-variable synthesis.
+    You are an elite quantitative MLB betting engine executing deep multi-variable synthesis using a Universal 100-Point Bipolar Scale (Centered at 50).
 
     === RECURSIVE MEMORY & FACTOR WEIGHTS ===
     {json.dumps(memory.get("reasoning_factor_weights", {}), indent=2)}
@@ -727,11 +735,16 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     === ACTIVE PENDING PICKS ===
     {json.dumps(open_picks, indent=2)}
 
+    SCORING FRAMEWORK (0 TO 100 BIPOLAR SCALE):
+    - 50 = League Average / Neutral (no edge).
+    - 75 to 100 = Substantial to Elite Advantage (actively drives support for the team).
+    - 0 to 25 = Severe Liability / Disaster Spot (actively drains support and boosts opponent).
+
     STRICT RULES:
     1. MARKET PROBABILITY ANCHOR: You MUST anchor all probability evaluations to the provided 'Market Base Prob'. Do NOT evaluate massive underdogs (+160 or higher) as 50/50 coin flips. Maximum allowable shift from the Market Base Prob is ±7.0%.
     2. FACTUAL PITCHERS: NEVER invent or swap starting pitchers. Ground analysis in confirmed starters.
-    3. STARTING PITCHER TAGGING (SP): Whenever you mention a starting pitcher's name in your reasoning text, you MUST append "(SP)" immediately after their name (e.g., "McClanahan (SP)"). This is required for tracking model attribution.
-    4. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, penalize them appropriately, but do not let bullpen fatigue completely override elite starting pitchers.
+    3. STARTING PITCHER METRICS TAGGING (SP-METRICS): Include the tag `(SP-METRICS)` immediately after a starting pitcher's name ONLY IF your core pick reasoning relies heavily on their expected metrics, peripheral numbers (like xwOBA/FIP), or skill advantage evaluated on the 0-100 scale.
+    4. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly against the 0-100 load scale. If Python flags a taxed bullpen (>250 load), treat it as a severe liability score (0-25).
     5. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
     6. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
     7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
@@ -767,7 +780,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "model_prob": "58.0%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<tight summary highlighting specific drivers including start times and incorporating (SP) tags>"
+          "reasoning": "<tight summary highlighting specific drivers including 0-100 bipolar scores for metrics and incorporating (SP-METRICS) when applicable>"
         }}
       ]
     }}
@@ -815,7 +828,7 @@ def main():
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
     
-    learning_note = ai_response.get("evolution_learning_note", "Maintain balanced quantitative multi-factor evaluation.")
+    learning_note = ai_response.get("evolution_learning_note", "Maintain balanced bipolar 100-point multi-factor evaluation.")
     updated_memory["learnings_and_adjustments"] = learning_note
     
     with open("og_memory.json", "w") as f: 
