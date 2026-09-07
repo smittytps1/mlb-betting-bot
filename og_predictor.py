@@ -462,7 +462,7 @@ def load_memory():
         "total_bets": 0, "wins": 0, "losses": 0, "win_rate": "0%", "net_profit_dollars": 0.0,
         "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
         "reasoning_factor_weights": {
-            "starting_pitcher_expected_metrics": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate expected metrics."},
+            "starting_pitcher_expected_metrics": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate starting pitcher (SP) metrics."},
             "platoon_and_lineup_splits": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate wRC+ and splits."},
             "statcast_contact_quality": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate xwOBA and Hard-Hit%."},
             "multi_source_consensus_and_divergence": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": "Evaluate model divergence."},
@@ -509,12 +509,9 @@ def update_memory_from_sheet(sheet, memory):
             factors[key]["losses"] = 0.0
             factors[key]["net_profit"] = 0.0
 
-        # Upgraded comprehensive keyword map matching actual LLM reasoning phrasing
+        # Keyword map using strict (sp) tag to completely prevent bullpen cross-contamination
         keywords_map = {
-            "starting_pitcher_expected_metrics": [
-                "starting pitcher", "starter", "rotation", "pitcher profile", 
-                "strikeout upside", "early-game control", "peripheral metrics"
-            ],
+            "starting_pitcher_expected_metrics": ["(sp)"],
             "platoon_and_lineup_splits": [
                 "platoon", "lineup splits", "hitting splits", "wrc+", 
                 "offensive advantage", "matchup-specific hitting"
@@ -564,7 +561,7 @@ def update_memory_from_sheet(sheet, memory):
                         factors[factor_key]["losses"] += decay_weight
                         factors[factor_key]["net_profit"] += (profit_val * decay_weight)
 
-        # --- RELATIVE WEIGHTING SYSTEM (TUNED FOR PRECISION) ---
+        # --- RELATIVE WEIGHTING SYSTEM ---
         valid_profits = {}
         for factor_key, data in factors.items():
             t_count = data["wins"] + data["losses"]
@@ -582,11 +579,9 @@ def update_memory_from_sheet(sheet, memory):
                     continue
                 
                 net_p = data["net_profit"]
-                # Deviation from group mean, scaled with a finer divisor (250.0) for smooth decimals
                 deviation = net_p - mean_profit
                 raw_weight = 1.0 + (deviation / 250.0)
                 
-                # Wider safe boundaries (0.60x to 1.40x) to prevent premature clipping
                 bounded_weight = max(0.60, min(1.40, round(raw_weight, 2)))
                 data["weight"] = bounded_weight
                 
@@ -735,14 +730,15 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     STRICT RULES:
     1. MARKET PROBABILITY ANCHOR: You MUST anchor all probability evaluations to the provided 'Market Base Prob'. Do NOT evaluate massive underdogs (+160 or higher) as 50/50 coin flips. Maximum allowable shift from the Market Base Prob is ±7.0%.
     2. FACTUAL PITCHERS: NEVER invent or swap starting pitchers. Ground analysis in confirmed starters.
-    3. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, penalize them appropriately, but do not let bullpen fatigue completely override elite starting pitchers.
-    4. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
-    5. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
-    6. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
-    7. TOTALS REQUIREMENT: All recommended Over/Under Totals MUST possess an Expected Value of 12.0% or higher. Do not output borderline totals.
-    8. NO SPREAD/TOTAL COMBOS: Never pick parlay-style outcomes. Stick to single-market Moneyline, Run Line, or Total selections.
-    9. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
-    10. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field. Never accidentally output the wrong team.
+    3. STARTING PITCHER TAGGING (SP): Whenever you mention a starting pitcher's name in your reasoning text, you MUST append "(SP)" immediately after their name (e.g., "McClanahan (SP)"). This is required for tracking model attribution.
+    4. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly. If Python flags a closer on back-to-back usage, penalize them appropriately, but do not let bullpen fatigue completely override elite starting pitchers.
+    5. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
+    6. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
+    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
+    8. TOTALS REQUIREMENT: All recommended Over/Under Totals MUST possess an Expected Value of 12.0% or higher. Do not output borderline totals.
+    9. NO SPREAD/TOTAL COMBOS: Never pick parlay-style outcomes. Stick to single-market Moneyline, Run Line, or Total selections.
+    10. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
+    11. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field. Never accidentally output the wrong team.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
@@ -771,7 +767,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "model_prob": "58.0%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<tight summary highlighting specific drivers including start times>"
+          "reasoning": "<tight summary highlighting specific drivers including start times and incorporating (SP) tags>"
         }}
       ]
     }}
@@ -811,7 +807,6 @@ def main():
 
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     
-    # Using the accurate, normalized bullpen load metric
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
     odds = fetch_mlb_odds(odds_key)
@@ -820,7 +815,6 @@ def main():
     open_picks = get_today_existing_picks(sheet, today_date_str)
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
     
-    # Extract the AI's learning note and explicitly save it to memory before logging
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced quantitative multi-factor evaluation.")
     updated_memory["learnings_and_adjustments"] = learning_note
     
