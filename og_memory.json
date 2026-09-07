@@ -4,28 +4,28 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Recent historical data highlights a negative return on heavily weighted bullpen fatigue and platoon split models, indicating potential market overcorrection in these areas. Moving forward, the system is scaling down emphasis on these splits while heavily anchoring to statcast contact quality to capture untaxed predictive value.",
+  "learnings_and_adjustments": "Statcast contact quality metrics continue to drive sustained profitability, warranting their increased weighting over struggling platoon and bullpen fatigue models. However, we are dynamically isolating heavily fatigued bullpens (load index > 200) where the late-game breakdown effect sizes remain pronounced while discarding minor fatigue signals.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.0,
-      "losses": 0.0,
+      "losses": 1.95,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": 0.0
+      "net_profit": -153.6
     },
     "platoon_and_lineup_splits": {
-      "wins": 1.9024999999999999,
-      "losses": 7.0,
+      "wins": 2.9025,
+      "losses": 11.9025,
       "weight": 0.75,
-      "instruction": "Negative return ($-406.22). Scaled de-emphasis.",
-      "net_profit": -406.222625
+      "instruction": "Negative return ($-856.31). Scaled de-emphasis.",
+      "net_profit": -856.305125
     },
     "statcast_contact_quality": {
-      "wins": 1.0,
-      "losses": 0.0,
-      "weight": 1.0,
-      "instruction": "Baseline sample size.",
-      "net_profit": 127.5
+      "wins": 2.0,
+      "losses": 1.0,
+      "weight": 1.5,
+      "instruction": "Profitable trend (+$190.45). Scaled priority.",
+      "net_profit": 190.45
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,18 +35,18 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 2.0,
-      "losses": 5.805,
+      "wins": 14.754999999999999,
+      "losses": 22.414875,
       "weight": 0.75,
-      "instruction": "Negative return ($-414.59). Scaled de-emphasis.",
-      "net_profit": -414.5875
+      "instruction": "Negative return ($-427.26). Scaled de-emphasis.",
+      "net_profit": -427.25587500000006
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
-      "losses": 0.0,
+      "losses": 2.0,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": 0.0
+      "net_profit": -232.0
     }
   }
 }
