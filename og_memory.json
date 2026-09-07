@@ -4,7 +4,7 @@
   "losses": 36.36,
   "win_rate": "39.5%",
   "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Statcast contact quality metrics continue to drive sustained profitability, warranting their increased weighting over struggling platoon and bullpen fatigue models. However, we are dynamically isolating heavily fatigued bullpens (load index > 200) where the late-game breakdown effect sizes remain pronounced while discarding minor fatigue signals.",
+  "learnings_and_adjustments": "Bullpen depth and fatigue metrics are actively underperforming the broader mean, causing a slight systemic de-emphasis in standard matchups. However, extreme bullpen exhaustion (e.g., Load Index >300) remains a highly predictive fade trigger, particularly when supported by positive Statcast contact quality from the opposing lineup.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.0,
@@ -17,14 +17,14 @@
       "wins": 2.9025,
       "losses": 11.9025,
       "weight": 0.75,
-      "instruction": "Negative return ($-856.31). Scaled de-emphasis.",
+      "instruction": "Underperforming group average ($-856.31 vs mean). Scaled de-emphasis.",
       "net_profit": -856.305125
     },
     "statcast_contact_quality": {
       "wins": 2.0,
       "losses": 1.0,
-      "weight": 1.5,
-      "instruction": "Profitable trend (+$190.45). Scaled priority.",
+      "weight": 1.25,
+      "instruction": "Outperforming group average (+$190.45 vs mean). Scaled priority.",
       "net_profit": 190.45
     },
     "multi_source_consensus_and_divergence": {
@@ -37,8 +37,8 @@
     "bullpen_depth_and_fatigue": {
       "wins": 14.754999999999999,
       "losses": 22.414875,
-      "weight": 0.75,
-      "instruction": "Negative return ($-427.26). Scaled de-emphasis.",
+      "weight": 0.84,
+      "instruction": "Underperforming group average ($-427.26 vs mean). Scaled de-emphasis.",
       "net_profit": -427.25587500000006
     },
     "umpire_and_situational_fatigue": {
