@@ -1,24 +1,24 @@
 {
-  "total_bets": 61,
-  "wins": 23.75,
-  "losses": 36.36,
-  "win_rate": "39.5%",
-  "net_profit_dollars": -638.56,
-  "learnings_and_adjustments": "Bullpen fatigue indicators are currently outperforming market adjustments, specifically when relief loads exceed 250 weighted pitches. Moving forward, the engine will prioritize severe bullpen liabilities to capture late-inning volatility while scaled back weighting on standard platoon splits.",
+  "total_bets": 66,
+  "wins": 24.47,
+  "losses": 39.9,
+  "win_rate": "38.0%",
+  "net_profit_dollars": -956.54,
+  "learnings_and_adjustments": "Platoon and lineup splits continue to outpace expectations, warranting increased scaling priority, while bullpen depth and fatigue have slightly underperformed the group mean, requiring moderated emphasis. Moving forward, prioritizing extreme bullpen disparities (>150 load diff) combined with favorable underlying contact quality metrics will optimize our +EV yield.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 0.0,
-      "losses": 0.0,
+      "wins": 0.5,
+      "losses": 0.5,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": 0.0
+      "net_profit": -6.520000000000003
     },
     "platoon_and_lineup_splits": {
-      "wins": 1.45125,
-      "losses": 9.45125,
-      "weight": 0.6,
-      "instruction": "Underperforming group average ($-789.15 vs mean). Scaled de-emphasis.",
-      "net_profit": -789.1525624999999
+      "wins": 1.4036875,
+      "losses": 9.4286875,
+      "weight": 1.21,
+      "instruction": "Outperforming group average (+$-792.68 vs mean). Scaled priority.",
+      "net_profit": -792.683184375
     },
     "statcast_contact_quality": {
       "wins": 1.0,
@@ -35,11 +35,11 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 12.303749999999999,
-      "losses": 20.463625,
-      "weight": 1.4,
-      "instruction": "Outperforming group average (+$-576.33 vs mean). Scaled priority.",
-      "net_profit": -576.3283124999998
+      "wins": 12.563562499999998,
+      "losses": 23.56544375,
+      "weight": 0.79,
+      "instruction": "Underperforming group average ($-897.18 vs mean). Scaled de-emphasis.",
+      "net_profit": -897.1773968749999
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
