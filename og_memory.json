@@ -4,7 +4,7 @@
   "losses": 39.9,
   "win_rate": "38.0%",
   "net_profit_dollars": -956.54,
-  "learnings_and_adjustments": "Recent evaluations reveal that heavily taxed bullpens (load index >90) are consistently underperforming their baseline projections, generating severe late-game liabilities (scored 0-25). Conversely, early lines are slightly overvaluing baseline starter sample sizes, enabling targeted probability shifts toward underdogs with high-grade (SP-METRICS) and fresher relief units.",
+  "learnings_and_adjustments": "Platoon and lineup splits are outperforming relative group averages and warrant sustained scaled priority (+1.21 weight). Simultaneously, fading heavily taxed bullpens (Load > 100) continues to be an essential contrarian driver, emphasizing rigid 0-25 liability scores for late-game disadvantages.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.5,
