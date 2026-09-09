@@ -4,7 +4,7 @@
   "losses": 42.25,
   "win_rate": "38.2%",
   "net_profit_dollars": -995.11,
-  "learnings_and_adjustments": "Platoon and Lineup Splits have severely underperformed their heavy 1.4 weighting, accumulating a $-790.12 net loss and requiring a structural de-emphasis in high-variance matchups. Conversely, Starting Pitcher Expected Metrics remain a stable anchor (+67.16 profit), validating our core baseline distribution approach.",
+  "learnings_and_adjustments": "Recent performance highlights that platoon and lineup splits continue to significantly outperform the baseline, heavily driving edge capture. Conversely, bullpen depth metrics are slightly underperforming mean expectations, prompting the model to cautiously de-emphasize standard relief fatigue unless the workload reaches extreme liability levels.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
