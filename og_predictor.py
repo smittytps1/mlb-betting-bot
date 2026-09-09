@@ -1,3 +1,6 @@
+# og_predictor.py
+# Updated with Strict Mathematical Transparency & Metric Breakdown Rules
+
 import os
 import json
 import re
@@ -536,7 +539,6 @@ def update_memory_from_sheet(sheet, memory):
             try: profit_val = float(r[pl_idx]) if len(r) > pl_idx and r[pl_idx] else 0.0
             except: profit_val = 0.0
 
-            # --- 50-GAME / 5-GAME BATCHED EXPONENTIAL DECAY ---
             decay_weight = 1.0
             if i >= 50:
                 exponent = ((i - 50) // 5) + 1
@@ -549,13 +551,11 @@ def update_memory_from_sheet(sheet, memory):
             
             net_profit_total += (profit_val * decay_weight)
 
-            # Identify all factors triggered in this reasoning string
             triggered_factors = []
             for factor_key, kws in keywords_map.items():
                 if any(kw in reasoning for kw in kws):
                     triggered_factors.append(factor_key)
 
-            # Apply fractional credit splitting so multi-factor bets don't double-count
             if triggered_factors:
                 fractional_share = 1.0 / len(triggered_factors)
                 for factor_key in triggered_factors:
@@ -569,7 +569,6 @@ def update_memory_from_sheet(sheet, memory):
                         factors[factor_key]["losses"] += (decay_weight * fractional_share)
                         factors[factor_key]["net_profit"] += (profit_val * decay_weight * fractional_share)
 
-        # --- RELATIVE WEIGHTING SYSTEM ---
         valid_profits = {}
         for factor_key, data in factors.items():
             t_count = data["wins"] + data["losses"]
@@ -740,27 +739,33 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
     - 75 to 100 = Substantial to Elite Advantage (actively drives support for the team).
     - 0 to 25 = Severe Liability / Disaster Spot (actively drains support and boosts opponent).
 
-    STRICT RULES:
-    1. MARKET PROBABILITY ANCHOR: You MUST anchor all probability evaluations to the provided 'Market Base Prob'. Do NOT evaluate massive underdogs (+160 or higher) as 50/50 coin flips. Maximum allowable shift from the Market Base Prob is ±7.0%.
+    STRICT RULES & MATHEMATICAL TRANSPARENCY:
+    1. MARKET PROBABILITY ANCHOR: You MUST anchor all probability evaluations to the provided 'Market Base Prob'. Maximum allowable shift from the Market Base Prob is ±7.0%.
     2. FACTUAL PITCHERS: NEVER invent or swap starting pitchers. Ground analysis in confirmed starters.
-    3. STARTING PITCHER METRICS TAGGING (SP-METRICS): Include the tag `(SP-METRICS)` immediately after a starting pitcher's name ONLY IF your core pick reasoning relies heavily on their expected metrics, peripheral numbers (like xwOBA/FIP), or skill advantage evaluated on the 0-100 scale.
+    3. MANDATORY METRIC BREAKDOWN IN REASONING: For every recommended pick, your text output in the 'reasoning' field MUST explicitly display the individual team inputs and the resulting dual-team midpoint score (calculated via: 50 + ((Team A - Team B) / 2)) for all 6 metrics:
+       - Starting Pitcher Metrics (SP-METRICS)
+       - Bullpen Depth & Fatigue (BULLPEN) [Must incorporate Python rolling workload status]
+       - Statcast Contact Quality (CONTACT-QUALITY)
+       - Platoon & Lineup Splits (SPLITS)
+       - Market Consensus & Divergence (CONSENSUS)
+       - Situational & External Factors (SITUATIONAL)
     4. BULLPEN FIDELITY: Respect the Season-Weighted Bullpen Status explicitly against the 0-100 load scale. If Python flags a taxed bullpen (>250 load), treat it as a severe liability score (0-25).
     5. SPORTSBOOKS: Pick ONLY from: {ALLOWED_SPORTSBOOKS}.
-    6. STRICT TOP-5 EV CAP: Evaluate every matchup on the board. Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. You must NEVER output more than 5 total picks per run.
-    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each against current odds. If the EV has dropped below 11.0%, output "REJECTED". If it remains at or above 11.0%, output "VALIDATED".
-    8. TOTALS REQUIREMENT: All recommended Over/Under Totals MUST possess an Expected Value of 12.0% or higher. Do not output borderline totals.
-    9. NO SPREAD/TOTAL COMBOS: Never pick parlay-style outcomes. Stick to single-market Moneyline, Run Line, or Total selections.
-    10. SPREAD / RUN LINE FORMATTING: If picking a Run Line, you MUST place the spread value inside the 'pick' field (e.g., "pick": "Atlanta Braves -1.5") and keep the bet_type clean (e.g., "bet_type": "Run Line (FanDuel)").
-    11. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field. Never accidentally output the wrong team.
+    6. STRICT TOP-5 EV CAP: Recommend ONLY the highest-value plays that calculate to an Expected Value (EV) of 11.0% or higher. Maximum 5 total picks per run.
+    7. MANDATORY VALIDATION: If 'ACTIVE PENDING PICKS' contains items, evaluate each. If EV < 11.0%, output "REJECTED". If >= 11.0%, output "VALIDATED".
+    8. TOTALS REQUIREMENT: All recommended Over/Under Totals MUST possess an Expected Value of 12.0% or higher.
+    9. NO SPREAD/TOTAL COMBOS: Stick to single-market Moneyline, Run Line, or Total selections.
+    10. SPREAD / RUN LINE FORMATTING: If picking a Run Line, place the spread value inside the 'pick' field (e.g., "pick": "Cleveland Guardians -1.5") and keep 'bet_type' clean.
+    11. MATCHING PICK TO REASONING: The team named in the 'pick' field MUST perfectly match the team favored in the 'reasoning' field.
 
     OUTPUT SCHEMA (STRICT JSON):
     {{
-      "evolution_learning_note": "Write a dynamic 2-sentence meta-analysis of recent performance identifying factors that are outperforming or underperforming to guide future runs.",
+      "evolution_learning_note": "Write a dynamic 2-sentence meta-analysis of recent performance identifying factors outperforming or underperforming.",
       "validations": [
         {{
           "row_index": <int matching row_index in open_picks>,
           "action": "VALIDATED" or "REJECTED",
-          "updated_odds": <int or float, e.g. -110>,
+          "updated_odds": <int or float>,
           "updated_implied_prob": "52.4%",
           "updated_model_prob": "58.0%",
           "updated_expected_value": "+11.7%",
@@ -780,7 +785,7 @@ def generate_picks_and_validations(odds_data, memory, open_picks, fatigue_rating
           "model_prob": "58.0%",
           "expected_value": "+11.7%",
           "high_agreement": "<Consensus/Divergence>",
-          "reasoning": "<tight summary highlighting specific drivers including 0-100 bipolar scores for metrics and incorporating (SP-METRICS) when applicable>"
+          "reasoning": "METRIC BREAKDOWN: SP-METRICS [Away: X | Home: Y -> Combined: Z] | BULLPEN [Away: X | Home: Y -> Combined: Z] | CONTACT [Away: X | Home: Y -> Combined: Z] | SPLITS [Away: X | Home: Y -> Combined: Z] | CONSENSUS [Score: X] | SITUATIONAL [Score: X]. [Brief narrative synthesis incorporating (SP-METRICS) and rolling bullpen load factors]."
         }}
       ]
     }}
