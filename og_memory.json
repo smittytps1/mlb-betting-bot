@@ -4,7 +4,7 @@
   "losses": 42.25,
   "win_rate": "38.2%",
   "net_profit_dollars": -995.11,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to significantly outperform the group average (+$-790.12 vs mean), justifying their 1.4x priority scaling in our multi-variable synthesis. Conversely, extreme bullpen exhaustion levels (>150 load indices) remain highly predictive of late-inning collapses, driving strict fading protocols.",
+  "learnings_and_adjustments": "Platoon and Lineup Splits have severely underperformed their heavy 1.4 weighting, accumulating a $-790.12 net loss and requiring a structural de-emphasis in high-variance matchups. Conversely, Starting Pitcher Expected Metrics remain a stable anchor (+67.16 profit), validating our core baseline distribution approach.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
