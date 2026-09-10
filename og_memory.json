@@ -1,10 +1,10 @@
 {
-  "total_bets": 71,
-  "wins": 26.14,
-  "losses": 42.25,
-  "win_rate": "38.2%",
-  "net_profit_dollars": -995.11,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "total_bets": 75,
+  "wins": 27.74,
+  "losses": 43.75,
+  "win_rate": "38.8%",
+  "net_profit_dollars": -926.88,
+  "learnings_and_adjustments": "Platoon and lineup splits continue to outproduce baseline expectations, heavily rewarding contrarian value against standard pitching metrics. Conversely, bullpen fatigue factors have underperformed the group mean, dictating a scaled de-emphasis in late-inning projection weightings.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
@@ -14,18 +14,18 @@
       "net_profit": 67.16666666666666
     },
     "platoon_and_lineup_splits": {
-      "wins": 1.333503125,
-      "losses": 9.307253124999999,
+      "wins": 1.7668279687499997,
+      "losses": 9.66564046875,
       "weight": 1.4,
-      "instruction": "Outperforming group average (+$-790.12 vs mean). Scaled priority.",
-      "net_profit": -790.12402515625
+      "instruction": "Outperforming group average (+$-775.77 vs mean). Scaled priority.",
+      "net_profit": -775.7678238984374
     },
     "statcast_contact_quality": {
-      "wins": 1.0,
+      "wins": 1.5,
       "losses": 0.8333333333333333,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": 61.891666666666666
+      "net_profit": 132.09166666666667
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,18 +35,18 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 13.310384374999998,
-      "losses": 25.42050489583334,
+      "wins": 14.069865156249998,
+      "losses": 26.63230442708334,
       "weight": 0.6,
-      "instruction": "Underperforming group average ($-990.94 vs mean). Scaled de-emphasis.",
-      "net_profit": -990.9401103645831
+      "instruction": "Underperforming group average ($-1005.94 vs mean). Scaled de-emphasis.",
+      "net_profit": -1005.944895419271
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
-      "losses": 1.0,
+      "losses": 0.975,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": -116.0
+      "net_profit": -113.0
     }
   }
 }
