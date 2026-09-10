@@ -1,10 +1,10 @@
 {
-  "total_bets": 75,
-  "wins": 27.74,
-  "losses": 43.75,
-  "win_rate": "38.8%",
-  "net_profit_dollars": -926.88,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to significantly underperform group averages ($-775.77), demanding a scaled de-emphasis against Statcast contact quality. Conversely, baseline starting pitcher metrics are yielding stable returns, reinforcing the strategy to heavily anchor edge detection on primary mound matchups.",
+  "total_bets": 76,
+  "wins": 27.69,
+  "losses": 44.54,
+  "win_rate": "38.3%",
+  "net_profit_dollars": -1020.05,
+  "learnings_and_adjustments": "Recent performance indicates platoon and lineup splits outperforming expectations (+$-828.39 vs mean), warranting scaled priority in matchup synthesis. Conversely, bullpen depth metrics are heavily underperforming, necessitating a de-emphasis on late-inning fatigue unless dynamic workload indices strictly flag extreme exhaustion (>250 load).",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
@@ -15,10 +15,10 @@
     },
     "platoon_and_lineup_splits": {
       "wins": 1.7668279687499997,
-      "losses": 9.66564046875,
+      "losses": 10.14189046875,
       "weight": 1.4,
-      "instruction": "Outperforming group average (+$-775.77 vs mean). Scaled priority.",
-      "net_profit": -775.7678238984374
+      "instruction": "Outperforming group average (+$-828.39 vs mean). Scaled priority.",
+      "net_profit": -828.3928238984374
     },
     "statcast_contact_quality": {
       "wins": 1.5,
@@ -36,10 +36,10 @@
     },
     "bullpen_depth_and_fatigue": {
       "wins": 14.069865156249998,
-      "losses": 26.63230442708334,
+      "losses": 26.941146317708345,
       "weight": 0.6,
-      "instruction": "Underperforming group average ($-1005.94 vs mean). Scaled de-emphasis.",
-      "net_profit": -1005.944895419271
+      "instruction": "Underperforming group average ($-1038.17 vs mean). Scaled de-emphasis.",
+      "net_profit": -1038.167021513021
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
