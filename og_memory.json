@@ -4,7 +4,7 @@
   "losses": 44.54,
   "win_rate": "38.3%",
   "net_profit_dollars": -1020.05,
-  "learnings_and_adjustments": "Recent performance indicates platoon and lineup splits outperforming expectations (+$-828.39 vs mean), warranting scaled priority in matchup synthesis. Conversely, bullpen depth metrics are heavily underperforming, necessitating a de-emphasis on late-inning fatigue unless dynamic workload indices strictly flag extreme exhaustion (>250 load).",
+  "learnings_and_adjustments": "Platoon and Lineup Splits continue to serve as an outsized driver of excess value, systematically punishing market assumptions when contrarian underdogs exhibit Fresh bullpen statuses. Conversely, heavily taxed bullpens (Load > 250) mathematically hemorrhage run prevention, heavily mitigating any starting pitching baseline advantages.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
