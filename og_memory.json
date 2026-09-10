@@ -4,7 +4,7 @@
   "losses": 43.75,
   "win_rate": "38.8%",
   "net_profit_dollars": -926.88,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to outproduce baseline expectations, heavily rewarding contrarian value against standard pitching metrics. Conversely, bullpen fatigue factors have underperformed the group mean, dictating a scaled de-emphasis in late-inning projection weightings.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to significantly underperform group averages ($-775.77), demanding a scaled de-emphasis against Statcast contact quality. Conversely, baseline starting pitcher metrics are yielding stable returns, reinforcing the strategy to heavily anchor edge detection on primary mound matchups.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5,
