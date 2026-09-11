@@ -4,7 +4,7 @@
   "losses": 45.27,
   "win_rate": "38.6%",
   "net_profit_dollars": -968.92,
-  "learnings_and_adjustments": "Recent performance indicates Platoon & Lineup Splits continue to significantly outpace group averages, prompting a 1.4x scaled prioritization in our max \u00b17.0% probability shifts. Conversely, Bullpen Depth & Fatigue has underperformed historically, refining our filtering to selectively target extreme load index mismatches (e.g., heavily taxed setups >150) to isolate true actionable edges.",
+  "learnings_and_adjustments": "Platoon and lineup splits are currently outperforming the group average, necessitating a scaled priority in our matchup breakdowns. Conversely, bullpen depth metrics are underperforming the mean, prompting a deliberate de-emphasis unless severe exhaustion (>250 load equivalent) is detected.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
