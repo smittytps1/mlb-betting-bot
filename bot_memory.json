@@ -16,7 +16,7 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Recent self-learning cycles aggressively confirm that enforcing a strict 58.0% probability cap on all Totals successfully shields against variance while isolating suppressed run environments. Moving forward, ruthlessly targeting immense starting pitching WHIP disparities against heavily taxed relief corps will remain the primary engine for extracting insulated structural expected value.",
+  "learnings_and_adjustments": "Recent bounded self-learning cycles furiously confirm that ruthlessly isolating massive early-game SP WHIP disparities extracts immense structural EV on short favorites and Run Lines. Moving forward, dynamic shifts will strictly enforce variance caps on all run totals (Max 58.0%) while aggressively targeting artificially suppressed plus-money run lines against heavily taxed late-game relief corps.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 49.31371629204232,
