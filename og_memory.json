@@ -1,10 +1,10 @@
 {
-  "total_bets": 78,
-  "wins": 28.43,
-  "losses": 45.27,
+  "total_bets": 83,
+  "wins": 29.86,
+  "losses": 47.4,
   "win_rate": "38.6%",
-  "net_profit_dollars": -968.92,
-  "learnings_and_adjustments": "Platoon and lineup splits are currently outperforming the group average, necessitating a scaled priority in our matchup breakdowns. Conversely, bullpen depth metrics are underperforming the mean, prompting a deliberate de-emphasis unless severe exhaustion (>250 load equivalent) is detected.",
+  "net_profit_dollars": -1041.83,
+  "learnings_and_adjustments": "Statcast contact quality metrics continue to outpace the market mean, signaling that exit velocity and barrel rates must receive scaled priority in synthesis. Conversely, broad platoon and lineup split evaluations have slightly underperformed, prompting a de-emphasized weighting unless extreme bullpen exhaustion is concurrently flagged.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -14,18 +14,18 @@
       "net_profit": 120.88666666666666
     },
     "platoon_and_lineup_splits": {
-      "wins": 2.080816778645833,
-      "losses": 10.07182796875,
-      "weight": 1.4,
-      "instruction": "Outperforming group average (+$-771.51 vs mean). Scaled priority.",
-      "net_profit": -771.5077779144532
+      "wins": 2.018442606380208,
+      "losses": 9.9182365703125,
+      "weight": 0.6,
+      "instruction": "Underperforming group average ($-764.65 vs mean). Scaled de-emphasis.",
+      "net_profit": -764.6538890187305
     },
     "statcast_contact_quality": {
-      "wins": 1.5,
+      "wins": 1.9500000000000002,
       "losses": 1.3333333333333333,
-      "weight": 1.0,
-      "instruction": "Baseline sample size.",
-      "net_profit": 82.09166666666667
+      "weight": 1.4,
+      "instruction": "Outperforming group average (+$146.08 vs mean). Scaled priority.",
+      "net_profit": 146.08041666666668
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,18 +35,18 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 14.21157085677083,
-      "losses": 27.28986475520834,
+      "wins": 15.392658980598956,
+      "losses": 29.742038184114584,
       "weight": 0.6,
-      "instruction": "Underperforming group average ($-1043.45 vs mean). Scaled de-emphasis.",
-      "net_profit": -1043.445105807161
+      "instruction": "Underperforming group average ($-1188.41 vs mean). Scaled de-emphasis.",
+      "net_profit": -1188.4085171834697
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
-      "losses": 0.975,
+      "losses": 0.9512499999999999,
       "weight": 1.0,
       "instruction": "Baseline sample size.",
-      "net_profit": -113.0
+      "net_profit": -110.15
     }
   }
 }
