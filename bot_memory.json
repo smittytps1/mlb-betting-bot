@@ -1,9 +1,9 @@
 {
-  "total_bets": 156,
-  "wins": 49.22,
-  "losses": 63.75,
-  "win_rate": "43.6%",
-  "net_profit_dollars": -1159.93,
+  "total_bets": 166,
+  "wins": 52.03,
+  "losses": 64.06,
+  "win_rate": "44.8%",
+  "net_profit_dollars": -877.91,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -16,21 +16,21 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Strictly enforcing the 58.0% probability cap on all Totals continues to provide a robust variance barrier while capturing heavily suppressed run environments for insulated high-alpha returns. Moving forward, ruthless isolation of massive starting pitching WHIP disparities\u2014especially against taxed late-game relief corps\u2014remains our paramount engine for exploiting structurally mispriced Run Lines and plus-money Underdogs.",
+  "learnings_and_adjustments": "Recent bounded self-learning cycles violently confirm that aggressively capping Total probabilities at 58.0% successfully maintains rigid variance barriers while safely exposing suppressed run markets. Moving forward, ruthless isolation of early-game SP WHIP disparities against highly taxed late-game relief corps remains the paramount engine for generating structural alpha on favorites and plus-money underdogs.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 46.21187400780313,
-      "losses": 58.15849026870016,
+      "wins": 49.31371629204232,
+      "losses": 58.82303746750189,
       "weight": 0.5,
-      "instruction": "Negative return ($-939.69). De-emphasize.",
-      "net_profit": -939.6852511043744
+      "instruction": "Negative return ($-657.2). De-emphasize.",
+      "net_profit": -657.196939121698
     },
     "platoon_and_lineup_splits": {
-      "wins": 20.40256717538641,
-      "losses": 18.991181796623774,
-      "weight": 1.4,
-      "instruction": "Profitable trend (+$400.6). Prioritize.",
-      "net_profit": 400.5961717857643
+      "wins": 20.900816875786234,
+      "losses": 20.674541571452952,
+      "weight": 1.23,
+      "instruction": "Profitable trend (+$226.29). Prioritize.",
+      "net_profit": 226.29119503665228
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -40,32 +40,32 @@
       "net_profit": 0.0
     },
     "ballpark_and_weather_simulation": {
-      "wins": 7.393578100746348,
-      "losses": 5.756961071173425,
-      "weight": 1.28,
-      "instruction": "Profitable trend (+$279.28). Prioritize.",
-      "net_profit": 279.28272053901935
+      "wins": 6.867704235923578,
+      "losses": 7.585657366734015,
+      "weight": 0.98,
+      "instruction": "Negative return ($-17.84). De-emphasize.",
+      "net_profit": -17.837344713535146
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 13.234846299140862,
-      "losses": 16.062276595291447,
-      "weight": 0.82,
-      "instruction": "Negative return ($-177.83). De-emphasize.",
-      "net_profit": -177.83364540291774
+      "wins": 12.236948784974626,
+      "losses": 16.27620462725053,
+      "weight": 0.66,
+      "instruction": "Negative return ($-337.59). De-emphasize.",
+      "net_profit": -337.58618997613354
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 39.692496218905575,
-      "losses": 48.50769239149654,
-      "weight": 0.5,
-      "instruction": "Negative return ($-787.47). De-emphasize.",
-      "net_profit": -787.4693006604238
+      "wins": 41.94247783756229,
+      "losses": 45.238192383325604,
+      "weight": 0.9,
+      "instruction": "Negative return ($-98.5). De-emphasize.",
+      "net_profit": -98.50059384603273
     },
     "umpire_and_situational_fatigue": {
-      "wins": 10.10927270398757,
-      "losses": 16.37316444568334,
-      "weight": 0.56,
-      "instruction": "Negative return ($-437.02). De-emphasize.",
-      "net_profit": -437.0209809574808
+      "wins": 11.513618615348781,
+      "losses": 16.556780912229215,
+      "weight": 0.68,
+      "instruction": "Negative return ($-320.11). De-emphasize.",
+      "net_profit": -320.11193531412636
     }
   }
 }
