@@ -4,7 +4,7 @@
   "losses": 47.4,
   "win_rate": "38.6%",
   "net_profit_dollars": -1041.83,
-  "learnings_and_adjustments": "Recent performance data shows severe underperformance in bullpen depth (-1066.54 units) and platoon splits (-883.15 units), automatically triggering a 0.7x weight devaluation for these factors. Conversely, starting pitcher metrics and Statcast contact quality continue to act as highly profitable, stable baseline anchors (1.0x weight) that drive the primary Edge calculations.",
+  "learnings_and_adjustments": "Recent performance highlights an overvaluation of heavily taxed bullpens and platoon splits, prompting a scaled 0.75x de-emphasis on those metrics. Moving forward, edge generation is heavily anchored to starting pitcher expected metrics and Statcast contact quality, which continue to drive positive baseline profit.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 2.018442606380208,
       "losses": 10.9182365703125,
-      "weight": 0.7,
-      "instruction": "Underperformance ($-883.15 vs mean). Gradually scaled de-emphasis (0.7x).",
+      "weight": 0.75,
+      "instruction": "Underperformance ($-883.15 vs mean). Gradually scaled de-emphasis (0.75x).",
       "net_profit": -883.1538890187305
     },
     "statcast_contact_quality": {
@@ -37,8 +37,8 @@
     "bullpen_depth_and_fatigue": {
       "wins": 15.867658980598955,
       "losses": 29.458196293489582,
-      "weight": 0.7,
-      "instruction": "Underperformance ($-1066.54 vs mean). Gradually scaled de-emphasis (0.7x).",
+      "weight": 0.75,
+      "instruction": "Underperformance ($-1066.54 vs mean). Gradually scaled de-emphasis (0.75x).",
       "net_profit": -1066.5414240897198
     },
     "umpire_and_situational_fatigue": {
