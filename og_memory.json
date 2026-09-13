@@ -4,7 +4,7 @@
   "losses": 49.53,
   "win_rate": "38.6%",
   "net_profit_dollars": -1111.46,
-  "learnings_and_adjustments": "Recent model iterations indicate a stabilization in contact quality signals (+116.27 net profit), reinforcing baseline weights, while bullpen depth fatigue (-1115.04) continues to misprice high-leverage late-game volatility. Accordingly, high-leverage bullpen load disparities have been scaled down slightly (0.88x) but remain highly scrutinized when teams exhibit 'FRESH' versus 'MODERATELY WORKED' differentials.",
+  "learnings_and_adjustments": "Recent performance analysis reveals significant market noise and variance in Bullpen Depth and Platoon Splits, prompting a calculated recursive de-emphasis to 0.88x and 0.95x respectively. Conversely, Starting Pitcher Metrics and Statcast Contact Quality remain highly robust, continuing to act as strong baseline anchors for probability synthesis.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 1.9591871427278642,
       "losses": 10.772324741796874,
-      "weight": 0.9,
-      "instruction": "Underperformance ($-876.64 vs mean). Gradually scaled de-emphasis (0.9x).",
+      "weight": 0.95,
+      "instruction": "Underperformance ($-876.64 vs mean). Gradually scaled de-emphasis (0.95x).",
       "net_profit": -876.6426945677941
     },
     "statcast_contact_quality": {
