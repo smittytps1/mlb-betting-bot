@@ -4,7 +4,7 @@
   "losses": 49.53,
   "win_rate": "38.6%",
   "net_profit_dollars": -1111.46,
-  "learnings_and_adjustments": "Recent performance indicates that bullpen fatigue and high-leverage load indexes are serving as crucial differentiators in late-game execution, significantly outperforming baseline expectations. Conversely, platoon splits have shown minor underperformance in large samples, warranting a dynamically scaled de-emphasis in today's model weighting.",
+  "learnings_and_adjustments": "Recent model iterations indicate a stabilization in contact quality signals (+116.27 net profit), reinforcing baseline weights, while bullpen depth fatigue (-1115.04) continues to misprice high-leverage late-game volatility. Accordingly, high-leverage bullpen load disparities have been scaled down slightly (0.88x) but remain highly scrutinized when teams exhibit 'FRESH' versus 'MODERATELY WORKED' differentials.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 1.9591871427278642,
       "losses": 10.772324741796874,
-      "weight": 0.85,
-      "instruction": "Underperformance ($-876.64 vs mean). Gradually scaled de-emphasis (0.85x).",
+      "weight": 0.9,
+      "instruction": "Underperformance ($-876.64 vs mean). Gradually scaled de-emphasis (0.9x).",
       "net_profit": -876.6426945677941
     },
     "statcast_contact_quality": {
@@ -37,8 +37,8 @@
     "bullpen_depth_and_fatigue": {
       "wins": 17.490942698235674,
       "losses": 31.901953145481773,
-      "weight": 0.85,
-      "instruction": "Underperformance ($-1115.04 vs mean). Gradually scaled de-emphasis (0.85x).",
+      "weight": 0.88,
+      "instruction": "Underperformance ($-1115.04 vs mean). Gradually scaled de-emphasis (0.88x).",
       "net_profit": -1115.0412695519005
     },
     "umpire_and_situational_fatigue": {
