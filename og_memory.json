@@ -4,7 +4,7 @@
   "losses": 51.56,
   "win_rate": "38.5%",
   "net_profit_dollars": -1124.13,
-  "learnings_and_adjustments": "Recent evaluations indicate that bullpen depth and high-leverage fatigue indices remain the most critical predictors of late-game variance, though slight underperformance has prompted a fractional de-emphasis (0.83x weight). Conversely, targeting extreme fatigue mismatches combined with optimal moneyline pricing continues to anchor our core advantage in vig-free market structures.",
+  "learnings_and_adjustments": "Platoon and lineup split metrics continue to provide stable outperformance (+$-870.46 vs mean), justifying their increased 1.05x weighting. Conversely, bullpen depth computations are actively de-emphasized at 0.82x due to recent underperformance, yet remain highly effective at identifying catastrophic fatigue spots (index > 80).",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 1.9028944522581375,
       "losses": 10.63370850470703,
-      "weight": 1.0,
-      "instruction": "Neutral relative return ($-870.46).",
+      "weight": 1.05,
+      "instruction": "Stable outperformance (+$-870.46 vs mean). Gradually scaled priority (1.05x).",
       "net_profit": -870.4570598394045
     },
     "statcast_contact_quality": {
@@ -37,8 +37,8 @@
     "bullpen_depth_and_fatigue": {
       "wins": 18.083062229990556,
       "losses": 34.273522154874364,
-      "weight": 0.83,
-      "instruction": "Underperformance ($-1228.67 vs mean). Gradually scaled de-emphasis (0.83x).",
+      "weight": 0.82,
+      "instruction": "Underperformance ($-1228.67 vs mean). Gradually scaled de-emphasis (0.82x).",
       "net_profit": -1228.6701227409721
     },
     "umpire_and_situational_fatigue": {
