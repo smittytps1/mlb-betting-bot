@@ -4,7 +4,7 @@
   "losses": 51.56,
   "win_rate": "38.5%",
   "net_profit_dollars": -1124.13,
-  "learnings_and_adjustments": "Platoon and lineup split metrics continue to provide stable outperformance (+$-870.46 vs mean), justifying their increased 1.05x weighting. Conversely, bullpen depth computations are actively de-emphasized at 0.82x due to recent underperformance, yet remain highly effective at identifying catastrophic fatigue spots (index > 80).",
+  "learnings_and_adjustments": "Recent model tracking demonstrates stark outperformance when isolating heavily taxed bullpens versus fresh units, affirming the severe penalties applied to extreme high-leverage fatigue. Platoon splits (scaled at 1.1x weight) continue to successfully expose inefficiently priced underdogs in contextually favorable matchups.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 1.9028944522581375,
       "losses": 10.63370850470703,
-      "weight": 1.05,
-      "instruction": "Stable outperformance (+$-870.46 vs mean). Gradually scaled priority (1.05x).",
+      "weight": 1.1,
+      "instruction": "Stable outperformance (+$-870.46 vs mean). Gradually scaled priority (1.1x).",
       "net_profit": -870.4570598394045
     },
     "statcast_contact_quality": {
