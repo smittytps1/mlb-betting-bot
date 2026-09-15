@@ -4,7 +4,7 @@
   "losses": 55.04,
   "win_rate": "37.5%",
   "net_profit_dollars": -1449.95,
-  "learnings_and_adjustments": "Platoon and Lineup Splits remain a critical strategic priority (1.2x weight) driving structural edge capture, while Bullpen Depth and Fatigue have severely underperformed their baseline (-$1402.88), fully justifying the system's recursive 0.75x de-emphasis.",
+  "learnings_and_adjustments": "Platoon and Lineup Splits continue to demonstrate stable outperformance, validating the gradual 1.25x scaling priority in the current weight matrix. Conversely, Bullpen Depth and Fatigue have severely underperformed against the mean (-$1402.88), necessitating the cautious 0.75x de-emphasis currently applied to mitigate liability.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 1.8135806666439285,
       "losses": 10.782845583030646,
-      "weight": 1.2,
-      "instruction": "Stable outperformance (+$-895.28 vs mean). Gradually scaled priority (1.2x).",
+      "weight": 1.25,
+      "instruction": "Stable outperformance (+$-895.28 vs mean). Gradually scaled priority (1.25x).",
       "net_profit": -895.284953480343
     },
     "statcast_contact_quality": {
