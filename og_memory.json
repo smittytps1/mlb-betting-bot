@@ -4,7 +4,7 @@
   "losses": 57.15,
   "win_rate": "36.8%",
   "net_profit_dollars": -1652.31,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate robust predictive stability, validating the scaled 1.25x priority weight. Conversely, general bullpen depth algorithms have seen slight underperformance requiring a 0.75x de-emphasis, though acute outliers like 'Taxed' relief statuses remain highly predictive severe liabilities that the model aggressively targets.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to drive stable outperformance, warranting a 1.25x priority scaling in today's multi-variable synthesis. Conversely, bullpen depth metrics have underperformed expectations, leading to a defensive 0.75x de-emphasis to actively limit variance exposure.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
