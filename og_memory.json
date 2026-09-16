@@ -1,10 +1,10 @@
 {
-  "total_bets": 100,
-  "wins": 33.08,
-  "losses": 55.04,
-  "win_rate": "37.5%",
-  "net_profit_dollars": -1449.95,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to deliver stable outperformance against the market, explicitly justifying the 1.25x prioritized scaling in multi-variable syntheses. Conversely, bullpen depth metrics display volatility in high-leverage baseline projections, validating the scaled de-emphasis while retaining extreme penalty weighting for overtly TAXED units.",
+  "total_bets": 104,
+  "wins": 33.24,
+  "losses": 57.15,
+  "win_rate": "36.8%",
+  "net_profit_dollars": -1652.31,
+  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate robust predictive stability, validating the scaled 1.25x priority weight. Conversely, general bullpen depth algorithms have seen slight underperformance requiring a 0.75x de-emphasis, though acute outliers like 'Taxed' relief statuses remain highly predictive severe liabilities that the model aggressively targets.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
@@ -14,18 +14,18 @@
       "net_profit": 120.88666666666666
     },
     "platoon_and_lineup_splits": {
-      "wins": 1.8135806666439285,
-      "losses": 10.782845583030646,
+      "wins": 2.281153810760625,
+      "losses": 10.710255258831426,
       "weight": 1.25,
-      "instruction": "Stable outperformance (+$-895.28 vs mean). Gradually scaled priority (1.25x).",
-      "net_profit": -895.284953480343
+      "instruction": "Stable outperformance (+$-838.26 vs mean). Gradually scaled priority (1.25x).",
+      "net_profit": -838.2552249638386
     },
     "statcast_contact_quality": {
-      "wins": 1.907253125,
+      "wins": 1.8868904687499999,
       "losses": 1.1666666666666665,
       "weight": 1.0,
       "instruction": "Baseline sample size (<5 graded plays).",
-      "net_profit": 118.99144010416667
+      "net_profit": 116.39520143229166
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,11 +35,11 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 18.991229128185037,
-      "losses": 36.67960474344807,
+      "wins": 19.088145161724675,
+      "losses": 37.973549607621216,
       "weight": 0.75,
-      "instruction": "Underperformance ($-1402.88 vs mean). Gradually scaled de-emphasis (0.75x).",
-      "net_profit": -1402.8769231264628
+      "instruction": "Underperformance ($-1514.51 vs mean). Gradually scaled de-emphasis (0.75x).",
+      "net_profit": -1514.5069163974051
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
