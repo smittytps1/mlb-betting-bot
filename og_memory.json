@@ -4,7 +4,7 @@
   "losses": 58.45,
   "win_rate": "37.6%",
   "net_profit_dollars": -1629.35,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to show stable outperformance, strongly justifying their 1.25x scaling multiplier in recent probability iterations. Conversely, bullpen depth metrics remain highly volatile and have underperformed expectations, validating the algorithm's gradual de-emphasis down to a 0.75x weight.",
+  "learnings_and_adjustments": "Recent performance indicates strong outperformance in Platoon and Lineup Splits (+1.25x scaling), whereas Bullpen Depth metrics have significantly underperformed and been de-emphasized (0.75x scaling). The betting engine is strategically prioritizing starting pitching and lineup mismatches to capture early-game value while heavily penalizing explicitly taxed bullpens.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
