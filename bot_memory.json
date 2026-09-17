@@ -1,9 +1,9 @@
 {
-  "total_bets": 196,
-  "wins": 59.59,
-  "losses": 64.16,
-  "win_rate": "48.2%",
-  "net_profit_dollars": 173.95,
+  "total_bets": 208,
+  "wins": 61.42,
+  "losses": 64.79,
+  "win_rate": "48.7%",
+  "net_profit_dollars": 282.48,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -16,21 +16,21 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Recent bound self-learning cycles aggressively validate that enforcing strict probability caps on Totals (Max 58.0%) continuously creates a highly resistant variance barrier, while ruthlessly targeting extreme early-game SP WHIP metrics effectively isolates deeply suppressed structural EV on plus-money underdogs. Moving forward, dynamic shifts will strictly maintain these thresholds, methodically fading taxed relief corps to consistently extract pristine alpha.",
+  "learnings_and_adjustments": "Recent bounded self-learning phases brutally confirm that isolating pristine SP WHIP metrics systematically extracts massive structural EV when exposing moderately-worked or heavily taxed late-game relief corps. Moving forward, enforcing unbreakable variance barriers on Totals (Max 58.0%) will safely insulate exposure while we continue violently hunting deep run-line inefficiencies.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 57.59453763036225,
-      "losses": 60.26889994929116,
-      "weight": 1.34,
-      "instruction": "Profitable trend (+$341.03). Prioritize.",
-      "net_profit": 341.029686079787
+      "wins": 59.63059825282959,
+      "losses": 61.35517437429392,
+      "weight": 1.43,
+      "instruction": "Profitable trend (+$425.74). Prioritize.",
+      "net_profit": 425.73643749803534
     },
     "platoon_and_lineup_splits": {
-      "wins": 20.1183777584536,
-      "losses": 20.719050867189505,
-      "weight": 1.13,
-      "instruction": "Profitable trend (+$132.76). Prioritize.",
-      "net_profit": 132.75795161503333
+      "wins": 18.388043119255318,
+      "losses": 21.05662047705102,
+      "weight": 0.88,
+      "instruction": "Negative return ($-124.62). De-emphasize.",
+      "net_profit": -124.62169571620004
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -40,32 +40,32 @@
       "net_profit": 0.0
     },
     "ballpark_and_weather_simulation": {
-      "wins": 10.313301800413385,
-      "losses": 8.715202012220965,
-      "weight": 1.29,
-      "instruction": "Profitable trend (+$287.49). Prioritize.",
-      "net_profit": 287.49268151954755
+      "wins": 9.722153223755608,
+      "losses": 9.25234574284208,
+      "weight": 1.17,
+      "instruction": "Profitable trend (+$165.84). Prioritize.",
+      "net_profit": 165.8381261263316
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 13.364387395953292,
-      "losses": 16.519926844144962,
-      "weight": 0.89,
-      "instruction": "Negative return ($-106.48). De-emphasize.",
-      "net_profit": -106.48458084360261
+      "wins": 13.306701105380597,
+      "losses": 19.120985264880808,
+      "weight": 0.57,
+      "instruction": "Negative return ($-434.92). De-emphasize.",
+      "net_profit": -434.9222925208746
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 45.04408447173583,
-      "losses": 46.161007851891284,
-      "weight": 1.29,
-      "instruction": "Profitable trend (+$285.11). Prioritize.",
-      "net_profit": 285.1113884743782
+      "wins": 43.60648768588195,
+      "losses": 44.162533548647595,
+      "weight": 1.4,
+      "instruction": "Profitable trend (+$403.82). Prioritize.",
+      "net_profit": 403.82096390478307
     },
     "umpire_and_situational_fatigue": {
-      "wins": 16.053016332141926,
-      "losses": 18.62890775843448,
-      "weight": 1.09,
-      "instruction": "Profitable trend (+$86.5). Prioritize.",
-      "net_profit": 86.49604579987381
+      "wins": 20.088567041320026,
+      "losses": 20.140187525765473,
+      "weight": 1.34,
+      "instruction": "Profitable trend (+$337.57). Prioritize.",
+      "net_profit": 337.5668302250044
     }
   }
 }
