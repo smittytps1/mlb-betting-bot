@@ -4,7 +4,7 @@
   "losses": 60.25,
   "win_rate": "37.1%",
   "net_profit_dollars": -1826.43,
-  "learnings_and_adjustments": "Recent performance data indicates a stable outperformance in Platoon/Lineup Splits, prompting a 1.25x scaled weighting multiplier to better exploit lineup mismatches. Conversely, Bullpen Depth and Fatigue models have severely underperformed their mean expectations, resulting in a 0.75x de-emphasis to systematically limit exposure to late-inning variance.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to out-yield baseline expectations, resulting in a 1.25x scaling factor in current projections. Conversely, bullpen depth metrics have underperformed recently, prompting a temporary 0.75x de-emphasis to recalibrate variance.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
