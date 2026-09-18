@@ -1,5 +1,5 @@
 # bot.py (OG Predictor)
-# Updated with N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, Bullpen Noise Filtering, and CLV Tracking
+# Updated with Verbose Odds API Error Logging, N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, Bullpen Noise Filtering, and CLV Tracking
 
 import os
 import json
@@ -40,7 +40,7 @@ MLB_TEAM_ALIASES = {
     "san francisco giants": ["san francisco giants", "giants", "sf", "san francisco"],
     "seattle mariners": ["seattle mariners", "mariners", "sea", "seattle"],
     "st. louis cardinals": ["st. louis cardinals", "cardinals", "cards", "stl", "st louis cardinals", "st. louis", "st louis"],
-    "tampa bay rays": ["tampa bay rays", "rays", "tb", "tampa bay", "tampa"],
+    "tampa bay rays": ["tampa bay rays", "tampa", "tb", "tampa bay"],
     "texas rangers": ["texas rangers", "rangers", "tex", "texas"],
     "toronto blue jays": ["toronto blue jays", "blue jays", "jays", "tor", "toronto"],
     "washington nationals": ["washington nationals", "nationals", "nats", "wsh", "was", "washington"]
@@ -114,7 +114,6 @@ def compute_quarter_kelly_units(odds, model_prob_str):
 
 # --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
-    print("Connecting to Google Sheets ('OG Predictor' Tab)...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
@@ -293,7 +292,6 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                             raw_pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
                             weight = leverage_weights.get(pid, 1.0)
                             
-                            # Mop-up noise filter: heavily weight actual leverage arms; discount mop-up
                             if weight >= 1.5:
                                 game_high_lev_pitches += (raw_pitches * weight)
                                 if pid not in team_stats[canonical]["high_lev_pitcher_dates"]:
@@ -310,7 +308,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        total_p = stats["total_high_lev_pitches"] # Base load index exclusively on high-leverage expenditure
+        total_p = stats["total_high_lev_pitches"]
         load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
         
         if load >= 90.0: status = "TAXED"
@@ -385,7 +383,10 @@ def auto_grade_pending_bets(sheet, odds_key):
         if not pending_rows: return 0
 
         resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3", timeout=10)
-        if resp.status_code != 200: return 0
+        if resp.status_code != 200: 
+            print(f"ODDS API ERROR (Scores): {resp.status_code} - {resp.text}")
+            return 0
+            
         scores_data = resp.json()
         updates = []
 
@@ -470,7 +471,7 @@ def auto_grade_pending_bets(sheet, odds_key):
         
         if updates:
             sheet.batch_update(updates)
-            print(f"Successfully auto-graded {len(pending_rows)} pending bet(s).")
+            print(f"Successfully auto-graded {len(updates)} pending bet(s).")
         return len(pending_rows)
     except Exception as e:
         print(f"Auto-grade batch notice: {e}")
@@ -578,12 +579,9 @@ def update_memory_from_sheet(sheet, memory):
                 net_p = data["net_profit"]
                 deviation = net_p - mean_profit
                 
-                # Smoothed scaling divisor
                 raw_target = 1.0 + (deviation / 1000.0)
-                # Tighter operating channel
                 clamped_target = max(0.75, min(1.25, round(raw_target, 2)))
                 
-                # Delta step limiter
                 prev_weight = float(data.get("weight", 1.0))
                 step = max(-0.05, min(0.05, clamped_target - prev_weight))
                 new_weight = round(prev_weight + step, 2)
@@ -604,8 +602,14 @@ def update_memory_from_sheet(sheet, memory):
 
 # --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAILS ---
 def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
-    return resp.json() if resp.status_code == 200 else []
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
+    resp = requests.get(url, timeout=10)
+    
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        print(f"ODDS API ERROR (Odds): {resp.status_code} - {resp.text}")
+        return []
 
 def get_today_existing_picks(sheet, today_date_str):
     rows = sheet.get_all_values()
@@ -774,6 +778,7 @@ def main():
     ensure_evolution_sheet(spreadsheet)
     
     odds_key = os.environ.get("ODDS_API_KEY")
+    print("Checking for pending bets to auto-grade...")
     graded_count = auto_grade_pending_bets(sheet, odds_key) if odds_key else 0
     update_scoreboard(spreadsheet)
 
@@ -783,14 +788,22 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
+    print(f"Fetching probables and fatigue data for {today_date_str}...")
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
+    print("Fetching live MLB odds...")
     odds = fetch_mlb_odds(odds_key)
-    if not odds: return
+    if not odds: 
+        print("No live odds found. Exiting.")
+        return
+    print(f"Found {len(odds)} games in Odds API.")
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
+    
+    print("Sending data to Gemini for analysis (this may take a moment)...")
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
+    print("Received response from Gemini.")
     
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced bipolar 100-point multi-factor evaluation.")
     updated_memory["learnings_and_adjustments"] = learning_note
@@ -798,7 +811,11 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
     
-    for val in ai_response.get("validations", []):
+    validations = ai_response.get("validations", [])
+    new_picks = ai_response.get("new_picks", [])
+    print(f"Processing {len(validations)} validations and {len(new_picks)} new picks...")
+    
+    for val in validations:
         if not isinstance(val, dict): continue
         row_idx = val.get("row_index")
         action = str(val.get("action", "")).strip().upper()
@@ -816,7 +833,6 @@ def main():
                 if "updated_implied_prob" in val and str(val["updated_implied_prob"]).upper() != "N/A": 
                     sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
                     
-                # ONLY overwrite Model Prob and EV if the model returned an actual calculation, NOT "N/A"
                 if updated_model_prob and str(updated_model_prob).upper() != "N/A": 
                     sheet.update_cell(row_idx, 8, updated_model_prob)
                     
@@ -845,7 +861,7 @@ def main():
         except Exception: return 0.0
 
     valid_new_picks = []
-    for p in ai_response.get("new_picks", []):
+    for p in new_picks:
         if not isinstance(p, dict): continue
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
@@ -858,7 +874,6 @@ def main():
         try: odds_val = float(p.get("odds", -110))
         except: odds_val = -110.0
         
-        # Hard Python validation for Tiered EV logic to catch LLM hallucinations
         is_home_rl = ("-1.5" in pick and len(game.split("@")) == 2 and match_canonical_team(game.split("@")[-1]) == match_canonical_team(re.sub(r'[-+]\s*\d+\.?\d*', '', pick)))
         if is_home_rl and ev_val < 14.0: continue
         elif market_norm == "total" and ev_val < 12.0: continue
@@ -868,6 +883,8 @@ def main():
         
         valid_new_picks.append(p)
 
+    print(f"Filtered to {len(valid_new_picks)} valid new picks based on strict EV thresholds.")
+    
     for p in sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]:
         odds_val = float(p.get("odds", -110)) if p.get("odds") else -110.0
         model_prob_str = str(p.get("model_prob", "50.0%"))
@@ -879,6 +896,8 @@ def main():
             "NEW", p.get("high_agreement", "No"), str(p.get("start_time", "")).strip()
         ], value_input_option="USER_ENTERED")
         existing_market_signatures.add(f"{str(p.get('game', '')).strip()} | {normalize_market_type(str(p.get('bet_type', '')))}")
+        
+    print("Run complete.")
 
 if __name__ == "__main__":
     main()
