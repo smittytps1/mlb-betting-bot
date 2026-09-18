@@ -1,5 +1,5 @@
-# bot.py (OG Predictor)
-# Updated with Tolerant Date Matching for Grading, N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, and CLV Tracking
+# bot.py (Main MLB Bot)
+# Updated with Tolerant Date Matching, N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, and CLV Tracking
 
 import os
 import json
@@ -120,9 +120,9 @@ def get_sheets():
     client = gspread.service_account_from_dict(json.loads(service_account_str), scopes=scopes)
     spreadsheet = client.open("MLB AI Betting Tracker")
     try:
-        sheet = spreadsheet.worksheet("OG Predictor")
+        sheet = spreadsheet.worksheet("mlb")
     except Exception:
-        sheet = spreadsheet.add_worksheet(title="OG Predictor", rows=500, cols=20)
+        sheet = spreadsheet.add_worksheet(title="mlb", rows=500, cols=20)
     return spreadsheet, sheet
 
 def ensure_headers(sheet):
@@ -147,8 +147,8 @@ def ensure_headers(sheet):
 
 def ensure_evolution_sheet(spreadsheet):
     try:
-        try: evo_sheet = spreadsheet.worksheet("OG Evolution & Learnings")
-        except Exception: evo_sheet = spreadsheet.add_worksheet(title="OG Evolution & Learnings", rows=200, cols=10)
+        try: evo_sheet = spreadsheet.worksheet("mlb Evolution & Learnings")
+        except Exception: evo_sheet = spreadsheet.add_worksheet(title="mlb Evolution & Learnings", rows=200, cols=10)
         if not evo_sheet.get_all_values():
             evo_sheet.insert_row(["Timestamp", "Sport", "Total Bets Evaluated", "Win Rate (%)", "Net Profit ($)", "Reasoning Factor Weights", "Active Strategy Adjustment", "Validation & Re-Synthesis Notes"], index=1)
         return evo_sheet
@@ -416,7 +416,7 @@ def auto_grade_pending_bets(sheet, odds_key):
                         try:
                             pick_dt = datetime.strptime(pick_date_str, "%Y-%m-%d").date()
                             match_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).date()
-                            if abs((pick_dt - match_dt).days) > 1: continue # Skip if date is off by more than 1 day (prevents matching wrong games in series)
+                            if abs((pick_dt - match_dt).days) > 1: continue 
                         except Exception: pass
                     
                     home_team, away_team = match.get("home_team", ""), match.get("away_team", "")
@@ -499,21 +499,21 @@ def auto_grade_pending_bets(sheet, odds_key):
 # --- 5. SCOREBOARD ENGINE ---
 def update_scoreboard(spreadsheet):
     try:
-        try: sb = spreadsheet.worksheet("OG Scoreboard")
-        except: sb = spreadsheet.add_worksheet(title="OG Scoreboard", rows=20, cols=10)
+        try: sb = spreadsheet.worksheet("mlb Scoreboard")
+        except: sb = spreadsheet.add_worksheet(title="mlb Scoreboard", rows=20, cols=10)
         scoreboard_data = [
             ["Bot / Sport & Timeframe", "Correct Picks (Wins)", "Incorrect Picks (Losses)", "Pending Bets", "Win Rate (%)", "Total Money Won / Lost ($)"],
-            ["OG Predictor (All-Time)", '=COUNTIF(\'OG Predictor\'!K:K, "WIN")', '=COUNTIF(\'OG Predictor\'!K:K, "LOSS")', '=COUNTIF(\'OG Predictor\'!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(\'OG Predictor\'!L:L)'],
-            ["OG Predictor (7-Day)", '=SUMPRODUCT((\'OG Predictor\'!K2:K="WIN")*(IFERROR(DATEVALUE(\'OG Predictor\'!A2:A),IFERROR(VALUE(\'OG Predictor\'!A2:A),0))>=TODAY()-7)*(\'OG Predictor\'!A2:A<>""))', '=SUMPRODUCT((\'OG Predictor\'!K2:K="LOSS")*(IFERROR(DATEVALUE(\'OG Predictor\'!A2:A),IFERROR(VALUE(\'OG Predictor\'!A2:A),0))>=TODAY()-7)*(\'OG Predictor\'!A2:A<>""))', '=SUMPRODUCT((\'OG Predictor\'!K2:K="PENDING")*(IFERROR(DATEVALUE(\'OG Predictor\'!A2:A),IFERROR(VALUE(\'OG Predictor\'!A2:A),0))>=TODAY()-7)*(\'OG Predictor\'!A2:A<>""))', '=IFERROR(B3/(B3+C3), 0)', '=SUMPRODUCT((IFERROR(DATEVALUE(\'OG Predictor\'!A2:A),IFERROR(VALUE(\'OG Predictor\'!A2:A),0))>=TODAY()-7)*(\'OG Predictor\'!A2:A<>"")*(IFERROR(VALUE(\'OG Predictor\'!L2:L),0)))']
+            ["MLB Predictor (All-Time)", '=COUNTIF(\'mlb\'!K:K, "WIN")', '=COUNTIF(\'mlb\'!K:K, "LOSS")', '=COUNTIF(\'mlb\'!K:K, "PENDING")', '=IFERROR(B2/(B2+C2), 0)', '=SUM(\'mlb\'!L:L)'],
+            ["MLB Predictor (7-Day)", '=SUMPRODUCT((\'mlb\'!K2:K="WIN")*(IFERROR(DATEVALUE(\'mlb\'!A2:A),IFERROR(VALUE(\'mlb\'!A2:A),0))>=TODAY()-7)*(\'mlb\'!A2:A<>""))', '=SUMPRODUCT((\'mlb\'!K2:K="LOSS")*(IFERROR(DATEVALUE(\'mlb\'!A2:A),IFERROR(VALUE(\'mlb\'!A2:A),0))>=TODAY()-7)*(\'mlb\'!A2:A<>""))', '=SUMPRODUCT((\'mlb\'!K2:K="PENDING")*(IFERROR(DATEVALUE(\'mlb\'!A2:A),IFERROR(VALUE(\'mlb\'!A2:A),0))>=TODAY()-7)*(\'mlb\'!A2:A<>""))', '=IFERROR(B3/(B3+C3), 0)', '=SUMPRODUCT((IFERROR(DATEVALUE(\'mlb\'!A2:A),IFERROR(VALUE(\'mlb\'!A2:A),0))>=TODAY()-7)*(\'mlb\'!A2:A<>"")*(IFERROR(VALUE(\'mlb\'!L2:L),0)))']
         ]
         sb.update(range_name="A1:F3", values=scoreboard_data, value_input_option="USER_ENTERED")
     except Exception: pass
 
 # --- 6. RECURSIVE MEMORY & FACTOR WEIGHTING ---
 def load_memory():
-    if os.path.exists("og_memory.json"):
+    if os.path.exists("mlb_memory.json"):
         try:
-            with open("og_memory.json", "r") as f: return json.load(f)
+            with open("mlb_memory.json", "r") as f: return json.load(f)
         except Exception: pass
     
     default_memory = {
@@ -528,7 +528,7 @@ def load_memory():
             "umpire_and_situational_fatigue": {"wins": 0.0, "losses": 0.0, "net_profit": 0.0, "weight": 1.0, "instruction": ""}
         }
     }
-    with open("og_memory.json", "w") as f: json.dump(default_memory, f, indent=2)
+    with open("mlb_memory.json", "w") as f: json.dump(default_memory, f, indent=2)
     return default_memory
 
 def update_memory_from_sheet(sheet, memory):
@@ -615,7 +615,7 @@ def update_memory_from_sheet(sheet, memory):
             memory["wins"], memory["losses"] = round(wins_total, 2), round(losses_total, 2)
             memory["win_rate"] = f"{round((wins_total / (wins_total + losses_total)) * 100, 1)}%"
             memory["net_profit_dollars"] = round(net_profit_total, 2)
-        with open("og_memory.json", "w") as f: json.dump(memory, f, indent=2)
+        with open("mlb_memory.json", "w") as f: json.dump(memory, f, indent=2)
     except Exception: pass
     return memory
 
@@ -826,9 +826,9 @@ def main():
     
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced bipolar 100-point multi-factor evaluation.")
     updated_memory["learnings_and_adjustments"] = learning_note
-    with open("og_memory.json", "w") as f: json.dump(updated_memory, f, indent=2)
+    with open("mlb_memory.json", "w") as f: json.dump(updated_memory, f, indent=2)
 
-    update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
+    update_evolution_log(spreadsheet, "MLB", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
     
     validations = ai_response.get("validations", [])
     new_picks = ai_response.get("new_picks", [])
@@ -887,7 +887,6 @@ def main():
         pick = str(p.get("pick", "")).strip()
         market_norm = normalize_market_type(bet_type)
         
-        # Verify duplicate to prevent stacking identical bets across subsequent runs
         if f"{game} | {market_norm}" in existing_market_signatures: continue
         if not check_for_hallucinated_pitchers(game, str(p.get("reasoning", "")), probable_pitchers): continue
 
