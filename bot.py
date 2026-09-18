@@ -1,5 +1,5 @@
 # bot.py (OG Predictor)
-# Updated with Verbose Odds API Error Logging, N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, Bullpen Noise Filtering, and CLV Tracking
+# Updated with Tolerant Date Matching for Grading, N/A Protection, Smooth Factor Oscillations, Tiered EV Thresholds, and CLV Tracking
 
 import os
 import json
@@ -381,6 +381,8 @@ def auto_grade_pending_bets(sheet, odds_key):
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
+        
+        print(f"-> Found {len(pending_rows)} pending bets to grade. Requesting last 3 days of scores...")
 
         resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3", timeout=10)
         if resp.status_code != 200: 
@@ -388,6 +390,7 @@ def auto_grade_pending_bets(sheet, odds_key):
             return 0
             
         scores_data = resp.json()
+        print(f"-> Odds API returned {len(scores_data)} active/recently completed games.")
         updates = []
 
         for row_idx, r in pending_rows:
@@ -400,25 +403,35 @@ def auto_grade_pending_bets(sheet, odds_key):
                 units = float(r[units_idx]) if r[units_idx] else 1.0
                 bet_implied_prob_str = str(r[impl_prob_idx]).replace("%", "").strip()
                 bet_implied_prob = float(bet_implied_prob_str) / 100.0 if bet_implied_prob_str else implied_prob_calc(odds)
+                
+                print(f"\nEvaluating pending bet: {game_title} | Pick: {pick_str} | Date: {pick_date_str}")
+                matched_game = False
 
                 for match in scores_data:
                     if not match.get("completed"): continue
-                    match_date_ny_str = ""
+                    
+                    # 1-Day Tolerance logic replacing strict date string match
                     commence_time_str = match.get("commence_time")
                     if commence_time_str:
                         try:
-                            match_date_ny_str = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+                            pick_dt = datetime.strptime(pick_date_str, "%Y-%m-%d").date()
+                            match_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).date()
+                            if abs((pick_dt - match_dt).days) > 1: continue # Skip if date is off by more than 1 day (prevents matching wrong games in series)
                         except Exception: pass
                     
-                    if pick_date_str != match_date_ny_str: continue
                     home_team, away_team = match.get("home_team", ""), match.get("away_team", "")
                     
                     if match_canonical_team(home_team) in game_title or match_canonical_team(away_team) in game_title:
+                        matched_game = True
                         scores = match.get("scores")
-                        if not scores or len(scores) < 2: continue
+                        if not scores or len(scores) < 2: 
+                            print(f"   - Match found but scores data is missing. Skipping.")
+                            continue
+                            
                         home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                         away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
                         total_score = home_score + away_score
+                        print(f"   - Match Confirmed! Final Score: {away_team} {away_score}, {home_team} {home_score}")
                         
                         status = "PENDING"
                         is_home = False
@@ -453,6 +466,8 @@ def auto_grade_pending_bets(sheet, odds_key):
                             elif status == "LOSS":
                                 profit = -100.0 * units
                             
+                            print(f"   - Graded as {status}. Profit: ${round(profit, 2)}")
+                            
                             clv_str = ""
                             if odds_key and commence_time_str:
                                 closing_prob = get_closing_odds_implied_prob(odds_key, commence_time_str, home_team, away_team, pick_str, bet_type, is_home)
@@ -464,15 +479,19 @@ def auto_grade_pending_bets(sheet, odds_key):
                             if clv_str:
                                 col_letter = chr(65 + clv_idx)
                                 updates.append({"range": f"{col_letter}{row_idx}", "values": [[clv_str]]})
-                        break
+                        break 
+                
+                if not matched_game:
+                    print("   - No completed game match found in the last 3 days.")
+
             except Exception as row_err:
                 print(f"Error grading row {row_idx}: {row_err}")
                 continue
         
         if updates:
             sheet.batch_update(updates)
-            print(f"Successfully auto-graded {len(updates)} pending bet(s).")
-        return len(pending_rows)
+            print(f"\nSuccessfully auto-graded {len(updates)} pending bet(s).")
+        return len(updates)
     except Exception as e:
         print(f"Auto-grade batch notice: {e}")
         return 0
@@ -788,7 +807,7 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
-    print(f"Fetching probables and fatigue data for {today_date_str}...")
+    print(f"\nFetching probables and fatigue data for {today_date_str}...")
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
@@ -867,6 +886,8 @@ def main():
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
         market_norm = normalize_market_type(bet_type)
+        
+        # Verify duplicate to prevent stacking identical bets across subsequent runs
         if f"{game} | {market_norm}" in existing_market_signatures: continue
         if not check_for_hallucinated_pitchers(game, str(p.get("reasoning", "")), probable_pitchers): continue
 
