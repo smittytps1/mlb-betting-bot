@@ -4,7 +4,7 @@
   "losses": 60.25,
   "win_rate": "37.1%",
   "net_profit_dollars": -1826.43,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to drive stable outperformance vs the market, confirming the scaled 1.25x priority weighting to isolate rotational mismatches. Conversely, bullpen depth metrics are showing sustained variance in high-leverage spots, justifying the recent 0.75x de-emphasis to suppress late-game noise.",
+  "learnings_and_adjustments": "Recent evaluations show a robust edge in heavily weighting platoon splits, driving our pivot toward teams with deep lineup flexibility. Conversely, predictive decay in heavily taxed bullpens has necessitated scaling down their reliance, focusing instead on strictly validated, rested relief corps to protect our models' late-game assumptions.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.8333333333333333,
