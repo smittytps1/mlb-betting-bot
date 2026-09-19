@@ -4,7 +4,7 @@
   "losses": 62.9,
   "win_rate": "36.6%",
   "net_profit_dollars": -1975.84,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate stable outperformance, justifying their increased 1.25x weighting in our models. Meanwhile, bullpen depth and fatigue are significantly underperforming relative to historical means, requiring the scaled 0.75x priority to mitigate short-term variance.",
+  "learnings_and_adjustments": "Recent cycles reveal deep liability originating from overvaluing moderately-worked bullpens ($-1859), leading to a scaled 0.75x de-emphasis. Conversely, platoon splits maintain heavy 1.25x weighting to actively exploit systemic market inefficiencies during late-inning pitching changes.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.7345833333333331,
