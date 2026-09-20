@@ -4,7 +4,7 @@
   "losses": 63.2,
   "win_rate": "37.7%",
   "net_profit_dollars": -1945.02,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to be the model's anchor with steady outperformance, justifying their 1.25x scaling. Conversely, bullpen depth metrics are significantly underperforming (-$1872), requiring the de-emphasized 0.75x weighting to mitigate variance.",
+  "learnings_and_adjustments": "Recent multi-variable tracking indicates Platoon and Lineup Splits are a leading driver of predictive stability, successfully scaling to a 1.25x weighting priority. Conversely, raw Bullpen Depth metrics have required a 0.75x de-emphasis to combat recent variance and better isolate true high-leverage fatigue.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.6645208333333332,
