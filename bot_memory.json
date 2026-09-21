@@ -1,9 +1,9 @@
 {
-  "total_bets": 232,
-  "wins": 64.0,
-  "losses": 66.31,
-  "win_rate": "49.1%",
-  "net_profit_dollars": 444.55,
+  "total_bets": 239,
+  "wins": 65.11,
+  "losses": 66.22,
+  "win_rate": "49.6%",
+  "net_profit_dollars": 585.78,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -16,21 +16,21 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Recent bound self-learning phases aggressively validate that ruthless isolation of extreme early-game SP WHIP disparities remains our absolute paramount engine for generating structural alpha on plus-money underdogs and run lines. Furthermore, strictly enforcing the 58.0% probability cap on all Totals consistently creates a highly resistant variance barrier while exposing mispriced run environments.",
+  "learnings_and_adjustments": "Recent bounded self-learning cycles violently confirm that isolating pristine SP WHIP metrics systematically extracts massive structural EV when fading moderately-worked or heavily taxed late-game relief corps on run lines. Moving forward, dynamically enforcing unbreakable variance barriers on Totals (Max 58.0%) will safely insulate exposure while we continue ruthlessly hunting deep pitching and bullpen inefficiencies.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 62.61661505591448,
-      "losses": 62.632557582325106,
+      "wins": 63.80192115537239,
+      "losses": 62.720972401413974,
       "weight": 1.5,
-      "instruction": "Profitable trend (+$682.55). Prioritize.",
-      "net_profit": 682.5476635708869
+      "instruction": "Profitable trend (+$814.21). Prioritize.",
+      "net_profit": 814.2134414034123
     },
     "platoon_and_lineup_splits": {
-      "wins": 19.856028542754633,
-      "losses": 21.565530089979852,
-      "weight": 0.92,
-      "instruction": "Negative return ($-77.8). De-emphasize.",
-      "net_profit": -77.79772653022764
+      "wins": 19.77179198130543,
+      "losses": 20.43053544267672,
+      "weight": 1.0,
+      "instruction": "Neutral return ($5.41).",
+      "net_profit": 5.405698856031243
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -40,32 +40,32 @@
       "net_profit": 0.0
     },
     "ballpark_and_weather_simulation": {
-      "wins": 10.439454252660235,
-      "losses": 13.768885955084297,
-      "weight": 0.71,
-      "instruction": "Negative return ($-287.82). De-emphasize.",
-      "net_profit": -287.82225613364955
+      "wins": 9.839184323971676,
+      "losses": 14.416669058415701,
+      "weight": 0.58,
+      "instruction": "Negative return ($-416.42). De-emphasize.",
+      "net_profit": -416.4205928955121
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 11.110241264974105,
-      "losses": 19.513174100741132,
+      "wins": 10.453101461840237,
+      "losses": 19.721194865711738,
       "weight": 0.5,
-      "instruction": "Negative return ($-770.79). De-emphasize.",
-      "net_profit": -770.7935523488926
+      "instruction": "Negative return ($-866.38). De-emphasize.",
+      "net_profit": -866.376861155452
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 46.411626799753634,
-      "losses": 48.98037571118734,
-      "weight": 1.27,
-      "instruction": "Profitable trend (+$269.55). Prioritize.",
-      "net_profit": 269.54869376779254
+      "wins": 45.44652073827579,
+      "losses": 49.70514640651863,
+      "weight": 1.1,
+      "instruction": "Profitable trend (+$100.57). Prioritize.",
+      "net_profit": 100.57225786959518
     },
     "umpire_and_situational_fatigue": {
-      "wins": 20.457023581259627,
-      "losses": 21.33156861408507,
-      "weight": 1.37,
-      "instruction": "Profitable trend (+$365.16). Prioritize.",
-      "net_profit": 365.16288780786806
+      "wins": 20.639170112431835,
+      "losses": 21.26604094310766,
+      "weight": 1.34,
+      "instruction": "Profitable trend (+$339.64). Prioritize.",
+      "net_profit": 339.63939971963424
     }
   }
 }
