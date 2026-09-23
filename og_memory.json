@@ -4,7 +4,7 @@
   "losses": 64.83,
   "win_rate": "37.9%",
   "net_profit_dollars": -1932.05,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to outpace expectations, justifying their scaled weighting, while bullpen fatigue metrics consistently highlight severe liability fade spots. Integrating these asymmetric relief mismatches allows us to confidently extract plus-money value in late-game situations.",
+  "learnings_and_adjustments": "Recent model performance indicates stable and severe outperformance from platoon/lineup splits against heavily taxed bullpens, validating our decision to scale Platoon Splits to 1.25x priority. Moving forward, we will aggressively max-shift probabilities (\u00b17.0%) against relief units displaying high high-lev pitch loads over a 2-day rolling window.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5440270833333332,
