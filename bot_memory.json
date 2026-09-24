@@ -1,9 +1,9 @@
 {
-  "total_bets": 246,
-  "wins": 64.14,
-  "losses": 68.13,
-  "win_rate": "48.5%",
-  "net_profit_dollars": 198.07,
+  "total_bets": 250,
+  "wins": 62.45,
+  "losses": 70.34,
+  "win_rate": "47.0%",
+  "net_profit_dollars": -252.89,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -19,18 +19,18 @@
   "learnings_and_adjustments": "Maintain balanced quantitative multi-factor evaluation.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 62.94703359737499,
-      "losses": 64.80530407761545,
-      "weight": 1.42,
-      "instruction": "Profitable trend (+$423.1). Prioritize.",
-      "net_profit": 423.1026092144291
+      "wins": 61.27533185128798,
+      "losses": 67.12173506526386,
+      "weight": 0.96,
+      "instruction": "Negative return ($-37.1). De-emphasize.",
+      "net_profit": -37.098251014320425
     },
     "platoon_and_lineup_splits": {
-      "wins": 18.818625827728898,
-      "losses": 20.500076627078236,
-      "weight": 0.9,
-      "instruction": "Negative return ($-104.44). De-emphasize.",
-      "net_profit": -104.43821994841898
+      "wins": 18.349849966586135,
+      "losses": 21.87620991205526,
+      "weight": 0.69,
+      "instruction": "Negative return ($-314.88). De-emphasize.",
+      "net_profit": -314.88320930994115
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -40,32 +40,32 @@
       "net_profit": 0.0
     },
     "ballpark_and_weather_simulation": {
-      "wins": 9.393581932229273,
-      "losses": 14.964954539043097,
+      "wins": 9.122363852384435,
+      "losses": 14.743344282577171,
       "weight": 0.5,
-      "instruction": "Negative return ($-522.6). De-emphasize.",
-      "net_profit": -522.5950176115223
+      "instruction": "Negative return ($-529.16). De-emphasize.",
+      "net_profit": -529.1600307058177
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 10.830427475420523,
-      "losses": 20.919879915217976,
+      "wins": 10.41673486482615,
+      "losses": 21.44231322564084,
       "weight": 0.5,
-      "instruction": "Negative return ($-1036.53). De-emphasize.",
-      "net_profit": -1036.529213741202
+      "instruction": "Negative return ($-1161.97). De-emphasize.",
+      "net_profit": -1161.9725575910047
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 45.204295588963035,
-      "losses": 49.47577289886166,
-      "weight": 1.04,
-      "instruction": "Profitable trend (+$39.1). Prioritize.",
-      "net_profit": 39.100286522118424
+      "wins": 43.91833112531766,
+      "losses": 49.262297170528846,
+      "weight": 0.9,
+      "instruction": "Negative return ($-100.5). De-emphasize.",
+      "net_profit": -100.49843664595622
     },
     "umpire_and_situational_fatigue": {
-      "wins": 20.789428921476137,
-      "losses": 21.46712242191385,
+      "wins": 20.30824522560156,
+      "losses": 20.822198242079004,
       "weight": 1.33,
-      "instruction": "Profitable trend (+$327.66). Prioritize.",
-      "net_profit": 327.65710676048826
+      "instruction": "Profitable trend (+$332.14). Prioritize.",
+      "net_profit": 332.13780387708385
     }
   }
 }
