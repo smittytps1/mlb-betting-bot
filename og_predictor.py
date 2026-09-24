@@ -1,5 +1,5 @@
 # og_predictor.py
-# Updated with Smooth Factor Oscillations, Tiered EV Thresholds, Bullpen Noise Filtering, and CLV Tracking
+# Updated with Strict Absolute-Time Grading Lock to prevent wrong-game series matching
 
 import os
 import json
@@ -40,7 +40,7 @@ MLB_TEAM_ALIASES = {
     "san francisco giants": ["san francisco giants", "giants", "sf", "san francisco"],
     "seattle mariners": ["seattle mariners", "mariners", "sea", "seattle"],
     "st. louis cardinals": ["st. louis cardinals", "cardinals", "cards", "stl", "st louis cardinals", "st. louis", "st louis"],
-    "tampa bay rays": ["tampa bay rays", "rays", "tb", "tampa bay", "tampa"],
+    "tampa bay rays": ["tampa bay rays", "tampa", "tb", "tampa bay"],
     "texas rangers": ["texas rangers", "rangers", "tex", "texas"],
     "toronto blue jays": ["toronto blue jays", "blue jays", "jays", "tor", "toronto"],
     "washington nationals": ["washington nationals", "nationals", "nats", "wsh", "was", "washington"]
@@ -114,7 +114,6 @@ def compute_quarter_kelly_units(odds, model_prob_str):
 
 # --- 1. GOOGLE SHEETS SETUP ---
 def get_sheets():
-    print("Connecting to Google Sheets ('OG Predictor' Tab)...")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_str = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
     if not service_account_str: raise ValueError("GCP_SERVICE_ACCOUNT_JSON missing!")
@@ -293,7 +292,6 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
                             raw_pitches = int(p_stats.get("pitches", p_stats.get("numberOfPitches", 0)))
                             weight = leverage_weights.get(pid, 1.0)
                             
-                            # Mop-up noise filter: heavily weight actual leverage arms; discount mop-up
                             if weight >= 1.5:
                                 game_high_lev_pitches += (raw_pitches * weight)
                                 if pid not in team_stats[canonical]["high_lev_pitcher_dates"]:
@@ -310,7 +308,7 @@ def fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7):
 
     objective_ratings = {}
     for team, stats in team_stats.items():
-        total_p = stats["total_high_lev_pitches"] # Base load index exclusively on high-leverage expenditure
+        total_p = stats["total_high_lev_pitches"]
         load = round(float(total_p) / float(days_back_bp), 1) if total_p > 0 else 0.0
         
         if load >= 90.0: status = "TAXED"
@@ -383,10 +381,16 @@ def auto_grade_pending_bets(sheet, odds_key):
         
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
+        
+        print(f"-> Found {len(pending_rows)} pending bets to grade. Requesting last 3 days of scores...")
 
         resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3", timeout=10)
-        if resp.status_code != 200: return 0
+        if resp.status_code != 200: 
+            print(f"ODDS API ERROR (Scores): {resp.status_code} - {resp.text}")
+            return 0
+            
         scores_data = resp.json()
+        print(f"-> Odds API returned {len(scores_data)} active/recently completed games.")
         updates = []
 
         for row_idx, r in pending_rows:
@@ -399,25 +403,44 @@ def auto_grade_pending_bets(sheet, odds_key):
                 units = float(r[units_idx]) if r[units_idx] else 1.0
                 bet_implied_prob_str = str(r[impl_prob_idx]).replace("%", "").strip()
                 bet_implied_prob = float(bet_implied_prob_str) / 100.0 if bet_implied_prob_str else implied_prob_calc(odds)
+                
+                print(f"\nEvaluating pending bet: {game_title} | Pick: {pick_str} | Date: {pick_date_str}")
+                matched_game = False
 
                 for match in scores_data:
                     if not match.get("completed"): continue
-                    match_date_ny_str = ""
-                    commence_time_str = match.get("commence_time")
-                    if commence_time_str:
-                        try:
-                            match_date_ny_str = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-                        except Exception: pass
                     
-                    if pick_date_str != match_date_ny_str: continue
+                    commence_time_str = match.get("commence_time")
+                    game_start_time_str = str(r[15]).strip() if len(r) > 15 else "" # Column 16 is Game Start Time
+                    
+                    if commence_time_str and game_start_time_str:
+                        try:
+                            # Parse absolute time from Odds API
+                            api_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
+                            
+                            # Parse absolute time from Spreadsheet
+                            clean_sheet_time = game_start_time_str.replace(" EDT", "").replace(" EST", "")
+                            sheet_dt = datetime.strptime(clean_sheet_time, "%Y-%m-%d %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+                            
+                            # Reject if timestamps drift by more than 4 hours (14400 seconds) - Prevents wrong game in a series
+                            if abs((api_dt - sheet_dt).total_seconds()) > 14400:
+                                continue 
+                        except Exception: 
+                            pass
+                    
                     home_team, away_team = match.get("home_team", ""), match.get("away_team", "")
                     
                     if match_canonical_team(home_team) in game_title or match_canonical_team(away_team) in game_title:
+                        matched_game = True
                         scores = match.get("scores")
-                        if not scores or len(scores) < 2: continue
+                        if not scores or len(scores) < 2: 
+                            print(f"   - Match found but scores data is missing. Skipping.")
+                            continue
+                            
                         home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                         away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
                         total_score = home_score + away_score
+                        print(f"   - Match Confirmed! Final Score: {away_team} {away_score}, {home_team} {home_score}")
                         
                         status = "PENDING"
                         is_home = False
@@ -452,6 +475,8 @@ def auto_grade_pending_bets(sheet, odds_key):
                             elif status == "LOSS":
                                 profit = -100.0 * units
                             
+                            print(f"   - Graded as {status}. Profit: ${round(profit, 2)}")
+                            
                             clv_str = ""
                             if odds_key and commence_time_str:
                                 closing_prob = get_closing_odds_implied_prob(odds_key, commence_time_str, home_team, away_team, pick_str, bet_type, is_home)
@@ -463,15 +488,19 @@ def auto_grade_pending_bets(sheet, odds_key):
                             if clv_str:
                                 col_letter = chr(65 + clv_idx)
                                 updates.append({"range": f"{col_letter}{row_idx}", "values": [[clv_str]]})
-                        break
+                        break 
+                
+                if not matched_game:
+                    print("   - No completed game match found in the last 3 days.")
+
             except Exception as row_err:
                 print(f"Error grading row {row_idx}: {row_err}")
                 continue
         
         if updates:
             sheet.batch_update(updates)
-            print(f"Successfully auto-graded {len(pending_rows)} pending bet(s).")
-        return len(pending_rows)
+            print(f"\nSuccessfully auto-graded {len(updates)} pending bet(s).")
+        return len(updates)
     except Exception as e:
         print(f"Auto-grade batch notice: {e}")
         return 0
@@ -578,12 +607,9 @@ def update_memory_from_sheet(sheet, memory):
                 net_p = data["net_profit"]
                 deviation = net_p - mean_profit
                 
-                # Smoothed scaling divisor
                 raw_target = 1.0 + (deviation / 1000.0)
-                # Tighter operating channel
                 clamped_target = max(0.75, min(1.25, round(raw_target, 2)))
                 
-                # Delta step limiter
                 prev_weight = float(data.get("weight", 1.0))
                 step = max(-0.05, min(0.05, clamped_target - prev_weight))
                 new_weight = round(prev_weight + step, 2)
@@ -604,8 +630,14 @@ def update_memory_from_sheet(sheet, memory):
 
 # --- 7. MATCHUP FORMATTING & STRICT TEMPORAL GUARDRAILS ---
 def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
-    return resp.json() if resp.status_code == 200 else []
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
+    resp = requests.get(url, timeout=10)
+    
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        print(f"ODDS API ERROR (Odds): {resp.status_code} - {resp.text}")
+        return []
 
 def get_today_existing_picks(sheet, today_date_str):
     rows = sheet.get_all_values()
@@ -774,6 +806,7 @@ def main():
     ensure_evolution_sheet(spreadsheet)
     
     odds_key = os.environ.get("ODDS_API_KEY")
+    print("Checking for pending bets to auto-grade...")
     graded_count = auto_grade_pending_bets(sheet, odds_key) if odds_key else 0
     update_scoreboard(spreadsheet)
 
@@ -783,14 +816,22 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
 
+    print(f"\nFetching probables and fatigue data for {today_date_str}...")
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
+    print("Fetching live MLB odds...")
     odds = fetch_mlb_odds(odds_key)
-    if not odds: return
+    if not odds: 
+        print("No live odds found. Exiting.")
+        return
+    print(f"Found {len(odds)} games in Odds API.")
 
     open_picks = get_today_existing_picks(sheet, today_date_str)
+    
+    print("Sending data to Gemini for analysis (this may take a moment)...")
     ai_response = generate_picks_and_validations(odds, updated_memory, open_picks, fatigue_data, probable_pitchers)
+    print("Received response from Gemini.")
     
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced bipolar 100-point multi-factor evaluation.")
     updated_memory["learnings_and_adjustments"] = learning_note
@@ -798,21 +839,37 @@ def main():
 
     update_evolution_log(spreadsheet, "MLB (OG)", updated_memory, f"Execution run. Graded {graded_count} bets.", current_time_str)
     
-    for val in ai_response.get("validations", []):
+    validations = ai_response.get("validations", [])
+    new_picks = ai_response.get("new_picks", [])
+    print(f"Processing {len(validations)} validations and {len(new_picks)} new picks...")
+    
+    for val in validations:
         if not isinstance(val, dict): continue
         row_idx = val.get("row_index")
         action = str(val.get("action", "")).strip().upper()
+        
         if row_idx and action in ["VALIDATED", "REJECTED"]:
             sheet.update_cell(row_idx, 14, action)
             if action == "VALIDATED":
                 updated_odds = val.get("updated_odds")
                 updated_model_prob = val.get("updated_model_prob")
-                if updated_odds: sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
-                if "updated_implied_prob" in val: sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
-                if updated_model_prob: sheet.update_cell(row_idx, 8, updated_model_prob)
-                if "updated_expected_value" in val: sheet.update_cell(row_idx, 9, val["updated_expected_value"])
-                if updated_odds and updated_model_prob:
+                updated_ev = val.get("updated_expected_value")
+
+                if updated_odds and str(updated_odds).upper() != "N/A": 
+                    sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
+                
+                if "updated_implied_prob" in val and str(val["updated_implied_prob"]).upper() != "N/A": 
+                    sheet.update_cell(row_idx, 7, val["updated_implied_prob"])
+                    
+                if updated_model_prob and str(updated_model_prob).upper() != "N/A": 
+                    sheet.update_cell(row_idx, 8, updated_model_prob)
+                    
+                if updated_ev and str(updated_ev).upper() != "N/A": 
+                    sheet.update_cell(row_idx, 9, updated_ev)
+                    
+                if updated_odds and updated_model_prob and str(updated_odds).upper() != "N/A" and str(updated_model_prob).upper() != "N/A":
                     sheet.update_cell(row_idx, 10, compute_quarter_kelly_units(updated_odds, updated_model_prob))
+                    
                 if "high_agreement" in val: sheet.update_cell(row_idx, 15, str(val["high_agreement"]))
                 if val.get("reason"): sheet.update_cell(row_idx, 13, val["reason"])
                 sheet.update_cell(row_idx, 2, current_time_str)
@@ -832,12 +889,14 @@ def main():
         except Exception: return 0.0
 
     valid_new_picks = []
-    for p in ai_response.get("new_picks", []):
+    for p in new_picks:
         if not isinstance(p, dict): continue
         game = str(p.get("game", "")).strip()
         bet_type = str(p.get("bet_type", "")).strip()
         pick = str(p.get("pick", "")).strip()
         market_norm = normalize_market_type(bet_type)
+        
+        # Verify duplicate to prevent stacking identical bets across subsequent runs
         if f"{game} | {market_norm}" in existing_market_signatures: continue
         if not check_for_hallucinated_pitchers(game, str(p.get("reasoning", "")), probable_pitchers): continue
 
@@ -845,7 +904,6 @@ def main():
         try: odds_val = float(p.get("odds", -110))
         except: odds_val = -110.0
         
-        # Hard Python validation for Tiered EV logic to catch LLM hallucinations
         is_home_rl = ("-1.5" in pick and len(game.split("@")) == 2 and match_canonical_team(game.split("@")[-1]) == match_canonical_team(re.sub(r'[-+]\s*\d+\.?\d*', '', pick)))
         if is_home_rl and ev_val < 14.0: continue
         elif market_norm == "total" and ev_val < 12.0: continue
@@ -855,6 +913,8 @@ def main():
         
         valid_new_picks.append(p)
 
+    print(f"Filtered to {len(valid_new_picks)} valid new picks based on strict EV thresholds.")
+    
     for p in sorted(valid_new_picks, key=parse_ev, reverse=True)[:5]:
         odds_val = float(p.get("odds", -110)) if p.get("odds") else -110.0
         model_prob_str = str(p.get("model_prob", "50.0%"))
@@ -866,6 +926,8 @@ def main():
             "NEW", p.get("high_agreement", "No"), str(p.get("start_time", "")).strip()
         ], value_input_option="USER_ENTERED")
         existing_market_signatures.add(f"{str(p.get('game', '')).strip()} | {normalize_market_type(str(p.get('bet_type', '')))}")
+        
+    print("Run complete.")
 
 if __name__ == "__main__":
     main()
