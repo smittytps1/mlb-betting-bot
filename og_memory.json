@@ -1,31 +1,31 @@
 {
-  "total_bets": 133,
-  "wins": 39.62,
-  "losses": 64.83,
-  "win_rate": "37.9%",
-  "net_profit_dollars": -1932.05,
+  "total_bets": 136,
+  "wins": 39.06,
+  "losses": 66.62,
+  "win_rate": "37.0%",
+  "net_profit_dollars": -2168.01,
   "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 1.5440270833333332,
-      "losses": 0.6930447916666665,
+      "wins": 1.5022300520833332,
+      "losses": 0.6583925520833331,
       "weight": 1.0,
       "instruction": "Baseline sample size (<5 graded plays).",
-      "net_profit": 103.80242133333331
+      "net_profit": 103.45549882916667
     },
     "platoon_and_lineup_splits": {
-      "wins": 2.439089532140439,
-      "losses": 10.578133073749074,
+      "wins": 2.414064105580563,
+      "losses": 10.29392792109932,
       "weight": 1.25,
-      "instruction": "Stable outperformance (+$-832.81 vs mean). Gradually scaled priority (1.25x).",
-      "net_profit": -832.8109422736679
+      "instruction": "Stable outperformance (+$-806.48 vs mean). Gradually scaled priority (1.25x).",
+      "net_profit": -806.480748630659
     },
     "statcast_contact_quality": {
-      "wins": 3.18808754613823,
-      "losses": 1.4037083333333333,
+      "wins": 3.16433754613823,
+      "losses": 1.38941875,
       "weight": 1.0,
       "instruction": "Baseline sample size (<5 graded plays).",
-      "net_profit": 176.65081421595767
+      "net_profit": 174.66571004929096
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,11 +35,11 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 21.06274245860823,
-      "losses": 43.84496653157887,
+      "wins": 20.772980064975922,
+      "losses": 46.079024306583904,
       "weight": 0.75,
-      "instruction": "Underperformance ($-1902.68 vs mean). Gradually scaled de-emphasis (0.75x).",
-      "net_profit": -1902.6838966219989
+      "instruction": "Underperformance ($-2147.73 vs mean). Gradually scaled de-emphasis (0.75x).",
+      "net_profit": -2147.727493428328
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
