@@ -4,7 +4,7 @@
   "losses": 66.05,
   "win_rate": "37.3%",
   "net_profit_dollars": -2105.44,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "learnings_and_adjustments": "Platoon and lineup splits have exhibited stable outperformance, prompting a scaled priority weight of 1.25x in our synthesis to capture line mispricings. Conversely, bullpen depth metrics have recently underperformed our expectations, leading to a deliberate de-emphasis (0.75x) to curb late-game variance.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5440270833333332,
