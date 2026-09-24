@@ -608,9 +608,14 @@ def auto_grade_pending_bets(sheet, odds_key):
         pending_rows = [(i, r) for i, r in enumerate(rows[1:], start=2) if len(r) > status_idx and str(r[status_idx]).strip().upper() == "PENDING"]
         if not pending_rows: return 0
 
+        print(f"-> Found {len(pending_rows)} pending bets to auto-grade. Fetching score data...")
         resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/scores/?apiKey={odds_key}&daysFrom=3", timeout=10)
-        if resp.status_code != 200: return 0
+        if resp.status_code != 200: 
+            print(f"ODDS API ERROR (Scores): {resp.status_code} - {resp.text}")
+            return 0
+            
         scores_data = resp.json()
+        print(f"-> Odds API returned {len(scores_data)} active/recently completed games.")
         updates = []
 
         for row_idx, r in pending_rows:
@@ -622,25 +627,46 @@ def auto_grade_pending_bets(sheet, odds_key):
                 odds = float(r[odds_idx]) if r[odds_idx] else -110.0
                 units = float(r[units_idx]) if r[units_idx] else 1.0
 
+                print(f"\nEvaluating pending bet: {game_title} | Pick: {pick_str} | Date: {pick_date_str}")
+                matched_game = False
+
                 for match in scores_data:
                     if not match.get("completed"): continue
-                    match_date_ny_str = ""
-                    if match.get("commence_time"):
-                        try:
-                            match_date_ny_str = datetime.fromisoformat(match.get("commence_time").replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-                        except Exception: pass
                     
-                    if pick_date_str != match_date_ny_str: continue
+                    commence_time_str = match.get("commence_time")
+                    game_start_time_str = str(r[15]).strip() if len(r) > 15 else "" # Column 16 is Game Start Time
+                    
+                    if commence_time_str and game_start_time_str:
+                        try:
+                            # Parse the exact API UTC time
+                            api_dt = datetime.fromisoformat(commence_time_str.replace("Z", "+00:00"))
+                            
+                            # Parse the exact spreadsheet time (stripping the timezone string for strptime)
+                            clean_sheet_time = game_start_time_str.replace(" EDT", "").replace(" EST", "")
+                            sheet_dt = datetime.strptime(clean_sheet_time, "%Y-%m-%d %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+                            
+                            # Reject if timestamps drift by more than 4 hours (Prevents wrong game in series / doubleheaders)
+                            if abs((api_dt - sheet_dt).total_seconds()) > 14400:
+                                continue 
+                        except Exception as e: 
+                            pass # Fall back to team matching if parsing fails
+                    
                     home_team, away_team = match.get("home_team", ""), match.get("away_team", "")
                     
                     if match_canonical_team(home_team) in game_title or match_canonical_team(away_team) in game_title:
+                        matched_game = True
                         scores = match.get("scores")
-                        if not scores or len(scores) < 2: continue
+                        if not scores or len(scores) < 2: 
+                            print("   - Match found but scores data is missing. Skipping.")
+                            continue
+                            
                         home_score = next((int(s["score"]) for s in scores if s["name"] == home_team), 0)
                         away_score = next((int(s["score"]) for s in scores if s["name"] == away_team), 0)
                         total_score = home_score + away_score
+                        print(f"   - Match Confirmed! Final Score: {away_team} {away_score}, {home_team} {home_score}")
                         
                         status = "PENDING"
+                        is_home = False
                         
                         if "moneyline" in bet_type or "h2h" in bet_type:
                             winner = home_team if home_score > away_score else away_team
@@ -673,15 +699,20 @@ def auto_grade_pending_bets(sheet, odds_key):
                                 profit = ((odds / 100.0) * 100.0 * units) if odds > 0 else ((100.0 / abs(odds)) * 100.0 * units)
                             elif status == "LOSS":
                                 profit = -100.0 * units
+                            print(f"   - Graded as {status}. Profit: ${round(profit, 2)}")
                             updates.append({"range": f"K{row_idx}:L{row_idx}", "values": [[status, round(profit, 2)]]})
                         break
+                
+                if not matched_game:
+                    print("   - No completed game match found in the last 3 days.")
+                    
             except Exception as row_err:
                 print(f"Error grading row {row_idx}: {row_err}")
                 continue
         
         if updates:
             sheet.batch_update(updates)
-            print(f"Successfully auto-graded {len(updates)} pending bet(s).")
+            print(f"\nSuccessfully auto-graded {len(updates)} pending bet(s).")
         return len(updates)
     except Exception as e:
         print(f"Auto-grade batch notice: {e}")
@@ -697,8 +728,13 @@ def get_today_existing_picks_detailed(sheet, today_date_str):
     return existing
 
 def fetch_mlb_odds(odds_key):
-    resp = requests.get(f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american")
-    return resp.json() if resp.status_code == 200 else []
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={odds_key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american"
+    resp = requests.get(url, timeout=10)
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        print(f"ODDS API ERROR (Odds Endpoint): {resp.status_code} - {resp.text}")
+        return []
 
 def format_matchups(odds_data, probable_pitchers, fatigue_data, advanced_metrics, memory, today_date_str):
     valid, current_utc = [], datetime.now(ZoneInfo("America/New_York"))
@@ -815,6 +851,8 @@ def main():
     ensure_headers(mlb_sheet)
     
     odds_key = os.environ.get("ODDS_API_KEY")
+    
+    print("Checking for pending bets to auto-grade...")
     graded_count = auto_grade_pending_bets(mlb_sheet, odds_key) if odds_key else 0
     
     memory = load_memory()
@@ -823,13 +861,18 @@ def main():
     today_date_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     current_time_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S EDT")
     
+    print(f"\nFetching past learnings, probables, and fatigue data for {today_date_str}...")
     past_learnings_text = fetch_past_evolution_learnings(spreadsheet)
     probable_pitchers = fetch_today_probable_pitchers(today_date_str)
     advanced_metrics = fetch_team_advanced_metrics()
     fatigue_data = fetch_situational_fatigue_and_bullpen(days_back_bp=2, days_back_schedule=7)
     
+    print("Fetching live MLB odds...")
     odds = fetch_mlb_odds(odds_key)
-    if not odds: return
+    if not odds: 
+        print("No live odds found or API error. Exiting.")
+        return
+    print(f"Found {len(odds)} games in Odds API.")
 
     formatted_games = format_matchups(odds, probable_pitchers, fatigue_data, advanced_metrics, updated_memory, today_date_str)
     if not formatted_games:
@@ -837,7 +880,10 @@ def main():
         return
 
     open_picks_detailed = get_today_existing_picks_detailed(mlb_sheet, today_date_str)
+    
+    print("Sending data to Gemini for analysis (this may take a moment)...")
     ai_response = generate_mlb_picks(formatted_games, open_picks_detailed, updated_memory, past_learnings_text)
+    print("Received response from Gemini.")
     
     learning_note = ai_response.get("evolution_learning_note", "Maintain balanced quantitative multi-factor evaluation.")
     
@@ -849,6 +895,7 @@ def main():
 
     validations = ai_response.get("validations", [])
     if validations:
+        print(f"Processing {len(validations)} validations...")
         active_game_names = [match_canonical_team(g.get("home_team", "")) for g in odds] + [match_canonical_team(g.get("away_team", "")) for g in odds]
         for val in validations:
             row_idx = val.get("row_index")
@@ -857,20 +904,38 @@ def main():
                 if row_idx:
                     row_vals = mlb_sheet.row_values(row_idx)
                     if len(row_vals) > 10 and str(row_vals[10]).upper() == "PENDING" and not any(t in row_vals[2] for t in active_game_names): continue
+                    
                     mlb_sheet.update_cell(row_idx, 14, action)
+                    
                     if action == "VALIDATED":
-                        if val.get("updated_odds"): mlb_sheet.update_cell(row_idx, 6, int(round(float(val.get("updated_odds")))))
-                        if val.get("updated_model_prob"): mlb_sheet.update_cell(row_idx, 8, val.get("updated_model_prob"))
-                        if val.get("updated_expected_value"): mlb_sheet.update_cell(row_idx, 9, val.get("updated_expected_value"))
+                        updated_odds = val.get("updated_odds")
+                        updated_model_prob = val.get("updated_model_prob")
+                        updated_ev = val.get("updated_expected_value")
+
+                        # N/A Protection: Do not overwrite with N/A if game already started
+                        if updated_odds and str(updated_odds).upper() != "N/A": 
+                            mlb_sheet.update_cell(row_idx, 6, int(round(float(updated_odds))))
+                            
+                        if val.get("updated_implied_prob") and str(val.get("updated_implied_prob")).upper() != "N/A": 
+                            mlb_sheet.update_cell(row_idx, 7, val.get("updated_implied_prob"))
+                            
+                        if updated_model_prob and str(updated_model_prob).upper() != "N/A": 
+                            mlb_sheet.update_cell(row_idx, 8, updated_model_prob)
+                            
+                        if updated_ev and str(updated_ev).upper() != "N/A": 
+                            mlb_sheet.update_cell(row_idx, 9, updated_ev)
+                            
                     elif action == "REJECTED":
                         mlb_sheet.update_cell(row_idx, 11, "REJECTED")
                         mlb_sheet.update_cell(row_idx, 12, 0.0)
+                        
                     if val.get("reason"): mlb_sheet.update_cell(row_idx, 17, str(val.get("reason")).strip())
                     mlb_sheet.update_cell(row_idx, 2, current_time_str)
                     time.sleep(0.5)
             except Exception: pass
 
     mlb_picks = ai_response.get("mlb_tab_picks", [])
+    print(f"Evaluating {len(mlb_picks)} new picks against thresholds...")
     
     existing_rows = mlb_sheet.get_all_values()
     existing_market_signatures = set()
@@ -910,6 +975,8 @@ def main():
         
         existing_market_signatures.add(market_signature)
         time.sleep(0.5)
+        
+    print("Run complete.")
 
 if __name__ == "__main__":
     main()
