@@ -4,7 +4,7 @@
   "losses": 66.27,
   "win_rate": "37.5%",
   "net_profit_dollars": -1992.64,
-  "learnings_and_adjustments": "Platoon and lineup splits are continuing to demonstrate strong predictive outperformance, validating their scaled 1.25x weight priority. Bullpen fatigue depth remains a noisy factor globally, but severe situational exhaustion\u2014such as Baltimore's 151.5 load index\u2014remains a highly actionable outlier.",
+  "learnings_and_adjustments": "Recent meta-analysis indicates Platoon and Lineup Splits are providing stable outperformance and remain a scaled priority in our synthesis. Conversely, despite strict qualitative flags for taxed units, Bullpen Depth and Fatigue have historically underperformed yield expectations, demanding stringent adherence to our tiered EV thresholds to offset variance.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5022300520833332,
