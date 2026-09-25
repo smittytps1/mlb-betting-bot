@@ -4,7 +4,7 @@
   "losses": 66.27,
   "win_rate": "37.5%",
   "net_profit_dollars": -1992.64,
-  "learnings_and_adjustments": "Recent meta-analysis indicates Platoon and Lineup Splits are providing stable outperformance and remain a scaled priority in our synthesis. Conversely, despite strict qualitative flags for taxed units, Bullpen Depth and Fatigue have historically underperformed yield expectations, demanding stringent adherence to our tiered EV thresholds to offset variance.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to deliver stable outperformance, justifying our scaled 1.25x priority weighting in today's projections. Conversely, bullpen depth metrics are being actively de-emphasized (0.75x) following recent underperformance against the mean, ensuring our edge relies on higher-fidelity contact quality and SP indicators.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.5022300520833332,
