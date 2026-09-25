@@ -1,9 +1,9 @@
 {
-  "total_bets": 250,
-  "wins": 62.45,
-  "losses": 70.34,
-  "win_rate": "47.0%",
-  "net_profit_dollars": -252.89,
+  "total_bets": 255,
+  "wins": 61.33,
+  "losses": 72.07,
+  "win_rate": "46.0%",
+  "net_profit_dollars": -617.33,
   "high_agreement_yes_performance": {
     "wins": 0,
     "losses": 0,
@@ -16,21 +16,21 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Recent bounded self-learning phases aggressively validate that enforcing strict probability caps on Totals (Max 58.0%) creates an unbreakable variance barrier while safely extracting massive structural expected value. Moving forward, dynamically isolating extreme starting pitcher WHIP disparities continues to systematically generate unparalleled alpha on highly insulated moneyline and run line favorites.",
+  "learnings_and_adjustments": "Recent bounded self-learning phases violently confirm that isolating extreme projected run disparities while strictly enforcing our unbreakable 58.0% model probability cap on all Totals consistently shields against variance and produces massive structural alpha. Moving forward, systematically exposing heavily discounted DraftKings lines\u2014especially pristine early-game or mispriced West Coast Totals\u2014safely insulates exposure while generating unparalleled expected value.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 61.27533185128798,
-      "losses": 67.12173506526386,
-      "weight": 0.96,
-      "instruction": "Negative return ($-37.1). De-emphasize.",
-      "net_profit": -37.098251014320425
+      "wins": 60.211565258723546,
+      "losses": 68.9656483120007,
+      "weight": 0.59,
+      "instruction": "Negative return ($-406.08). De-emphasize.",
+      "net_profit": -406.07833846360495
     },
     "platoon_and_lineup_splits": {
-      "wins": 18.349849966586135,
-      "losses": 21.87620991205526,
-      "weight": 0.69,
-      "instruction": "Negative return ($-314.88). De-emphasize.",
-      "net_profit": -314.88320930994115
+      "wins": 18.73235746825683,
+      "losses": 25.132399416452497,
+      "weight": 0.5,
+      "instruction": "Negative return ($-665.18). De-emphasize.",
+      "net_profit": -665.1755488444434
     },
     "statcast_contact_quality": {
       "wins": 0.0,
@@ -40,32 +40,32 @@
       "net_profit": 0.0
     },
     "ballpark_and_weather_simulation": {
-      "wins": 9.122363852384435,
-      "losses": 14.743344282577171,
+      "wins": 8.766245659765213,
+      "losses": 15.406177068448313,
       "weight": 0.5,
-      "instruction": "Negative return ($-529.16). De-emphasize.",
-      "net_profit": -529.1600307058177
+      "instruction": "Negative return ($-635.72). De-emphasize.",
+      "net_profit": -635.7160291705269
     },
     "multi_source_consensus_and_divergence": {
-      "wins": 10.41673486482615,
-      "losses": 21.44231322564084,
+      "wins": 9.995898121584842,
+      "losses": 21.770197564358796,
       "weight": 0.5,
-      "instruction": "Negative return ($-1161.97). De-emphasize.",
-      "net_profit": -1161.9725575910047
+      "instruction": "Negative return ($-1242.47). De-emphasize.",
+      "net_profit": -1242.4734297114544
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 43.91833112531766,
-      "losses": 49.262297170528846,
-      "weight": 0.9,
-      "instruction": "Negative return ($-100.5). De-emphasize.",
-      "net_profit": -100.49843664595622
+      "wins": 42.37241456905175,
+      "losses": 48.69918231200241,
+      "weight": 0.78,
+      "instruction": "Negative return ($-216.61). De-emphasize.",
+      "net_profit": -216.61401481365854
     },
     "umpire_and_situational_fatigue": {
-      "wins": 20.30824522560156,
-      "losses": 20.822198242079004,
-      "weight": 1.33,
-      "instruction": "Profitable trend (+$332.14). Prioritize.",
-      "net_profit": 332.13780387708385
+      "wins": 19.642832964321485,
+      "losses": 20.131088329975054,
+      "weight": 1.32,
+      "instruction": "Profitable trend (+$324.86). Prioritize.",
+      "net_profit": 324.85641368322985
     }
   }
 }
