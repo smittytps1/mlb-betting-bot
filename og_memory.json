@@ -4,7 +4,7 @@
   "losses": 68.41,
   "win_rate": "36.7%",
   "net_profit_dollars": -2270.25,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate stable outperformance (scaled to 1.25x priority), while bullpen fatigue factors have negatively impacted profitability and remain structurally de-emphasized (0.75x). Multi-source divergence necessitates rigorous adherence to strictly tiered EV minimums tied intrinsically to factual market base probabilities.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate stable outperformance, validating the 1.25x scaling multiplier in our weighted array. Conversely, bullpen depth and fatigue have historically underperformed against true market variance, justifying the sustained 0.75x de-emphasis.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.4271185494791663,
