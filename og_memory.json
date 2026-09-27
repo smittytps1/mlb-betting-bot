@@ -4,7 +4,7 @@
   "losses": 67.44,
   "win_rate": "38.6%",
   "net_profit_dollars": -1823.78,
-  "learnings_and_adjustments": "Platoon and lineup splits continue to act as our primary stabilization anchor, justifying the scaled 1.25x priority weight to extract plus-money value. Conversely, we maintain strict devaluation of heavily taxed bullpens (0.75x weight) to insulate models from late-inning variance and performance degradation.",
+  "learnings_and_adjustments": "Platoon and lineup splits continue to demonstrate stable outperformance, justifying their 1.25x priority scaling in probability shifts. Conversely, bullpen depth modules are underperforming their baseline, necessitating the reduced 0.75x weighting to limit late-inning variance exposure.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.3557626220052077,
