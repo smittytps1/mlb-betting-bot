@@ -4,7 +4,7 @@
   "losses": 68.27,
   "win_rate": "38.5%",
   "net_profit_dollars": -1920.8,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "learnings_and_adjustments": "Platoon splits and contact quality models are displaying stable outperformance, warranting their increased 1.21x and 1.1x factor weights. Conversely, bullpen depth metrics continue to suffer severe variance, correctly justifying the 0.75x scaled de-emphasis to preserve capital.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.3238102205729163,
@@ -23,8 +23,8 @@
     "statcast_contact_quality": {
       "wins": 2.9732739036202647,
       "losses": 2.2696695674479166,
-      "weight": 1.05,
-      "instruction": "Stable outperformance (+$58.55 vs mean). Gradually scaled priority (1.05x).",
+      "weight": 1.1,
+      "instruction": "Stable outperformance (+$58.55 vs mean). Gradually scaled priority (1.1x).",
       "net_profit": 58.55002877851085
     },
     "multi_source_consensus_and_divergence": {
