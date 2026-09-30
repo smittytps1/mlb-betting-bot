@@ -4,7 +4,7 @@
   "losses": 67.62,
   "win_rate": "39.8%",
   "net_profit_dollars": -1663.25,
-  "learnings_and_adjustments": "Recent evaluations affirm that prioritizing pristine bullpen rest and statcast contact quality continues to generate highly stable EV. Adjustments have aggressively penalized heavily worked relief corps, strictly capturing late-inning liability factors.",
+  "learnings_and_adjustments": "Statcast contact quality and platoon splits continue to demonstrate stable outperformance, meriting their increased weightings of 1.2x and 1.11x respectively. Conversely, bullpen depth metrics remain a persistent liability ($-1657), justifying the model's continued de-emphasis of this factor to a 0.75x priority.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.2576197095442703,
@@ -16,15 +16,15 @@
     "platoon_and_lineup_splits": {
       "wins": 3.136694409857484,
       "losses": 10.028215734148473,
-      "weight": 1.16,
-      "instruction": "Stable outperformance (+$-675.04 vs mean). Gradually scaled priority (1.16x).",
+      "weight": 1.11,
+      "instruction": "Stable outperformance (+$-675.04 vs mean). Gradually scaled priority (1.11x).",
       "net_profit": -675.0355090348677
     },
     "statcast_contact_quality": {
       "wins": 2.9427047318767516,
       "losses": 2.2344917106770827,
-      "weight": 1.15,
-      "instruction": "Stable outperformance (+$57.87 vs mean). Gradually scaled priority (1.15x).",
+      "weight": 1.2,
+      "instruction": "Stable outperformance (+$57.87 vs mean). Gradually scaled priority (1.2x).",
       "net_profit": 57.869844590236326
     },
     "multi_source_consensus_and_divergence": {
