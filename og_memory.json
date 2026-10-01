@@ -4,7 +4,7 @@
   "losses": 66.88,
   "win_rate": "41.1%",
   "net_profit_dollars": -1469.59,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "learnings_and_adjustments": "Statcast contact quality (1.25x) and platoon splits (1.04x) continue to yield stable outperformance, meriting their increased weightings in recent predictive iterations. Conversely, bullpen depth metrics (-$1546.57 net) are being gradually de-emphasized (0.75x) to limit their detrimental pull in late-season matchups involving heavily taxed relievers.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.1947387240670566,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 3.0885400473260654,
       "losses": 9.755908560138646,
-      "weight": 1.06,
-      "instruction": "Stable outperformance (+$-652.29 vs mean). Gradually scaled priority (1.06x).",
+      "weight": 1.04,
+      "instruction": "Stable outperformance (+$-652.29 vs mean). Gradually scaled priority (1.04x).",
       "net_profit": -652.2948208993394
     },
     "statcast_contact_quality": {
