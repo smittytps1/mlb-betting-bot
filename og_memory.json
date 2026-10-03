@@ -4,7 +4,7 @@
   "losses": 67.49,
   "win_rate": "40.8%",
   "net_profit_dollars": -1550.89,
-  "learnings_and_adjustments": "Statcast contact quality and platoon splits continue to demonstrate strong predictive stability, generating outperformance against market medians. Conversely, bullpen depth metrics are showing volatility and underperformance, prompting a mechanical reduction in their weighting priority to isolate true signal.",
+  "learnings_and_adjustments": "Statcast contact quality and platoon splits continue to demonstrate robust, scalable outperformance, prompting an active emphasis via increased weight factors (1.25x and 1.07x respectively). Conversely, bullpen depth metrics remain negatively skewed and overly penalized by season-long fatigue, forcing a systematic de-emphasis (0.75x) to prevent late-inning variance leakage.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.1947387240670566,
