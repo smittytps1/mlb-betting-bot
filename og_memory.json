@@ -4,7 +4,7 @@
   "losses": 69.13,
   "win_rate": "39.8%",
   "net_profit_dollars": -1819.64,
-  "learnings_and_adjustments": "Statcast Contact Quality continues to demonstrate stable outperformance (+$65.68), justifying its increased 1.25x weight priority. Conversely, Bullpen Depth volatility remains a significant drag (-$1794.91), warranting strict de-emphasis (0.75x) when evaluating moderately taxed units.",
+  "learnings_and_adjustments": "Platoon splits and Statcast contact quality maintain their increased priority (1.13x and 1.25x respectively) as leading indicators of stable outperformance. Meanwhile, bullpen depth and fatigue have been structurally de-emphasized (0.75x) following acute underperformance (-$1,794.91) in recent sample sizes.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.162396978041715,
@@ -16,8 +16,8 @@
     "platoon_and_lineup_splits": {
       "wins": 3.0288403385189997,
       "losses": 9.897653643475588,
-      "weight": 1.12,
-      "instruction": "Stable outperformance (+$-671.09 vs mean). Gradually scaled priority (1.12x).",
+      "weight": 1.13,
+      "instruction": "Stable outperformance (+$-671.09 vs mean). Gradually scaled priority (1.13x).",
       "net_profit": -671.094505665232
     },
     "statcast_contact_quality": {
