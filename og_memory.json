@@ -1,31 +1,31 @@
 {
-  "total_bets": 162,
-  "wins": 45.74,
-  "losses": 69.13,
-  "win_rate": "39.8%",
-  "net_profit_dollars": -1819.64,
-  "learnings_and_adjustments": "Platoon splits and Statcast contact quality maintain their increased priority (1.13x and 1.25x respectively) as leading indicators of stable outperformance. Meanwhile, bullpen depth and fatigue have been structurally de-emphasized (0.75x) following acute underperformance (-$1,794.91) in recent sample sizes.",
+  "total_bets": 164,
+  "wins": 46.18,
+  "losses": 69.31,
+  "win_rate": "40.0%",
+  "net_profit_dollars": -1747.37,
+  "learnings_and_adjustments": "Statcast contact quality and platoon splits continue to demonstrate stable outperformance, warranting their scaled 1.25x and 1.18x priorities. Bullpen depth models remain slightly de-emphasized due to recent variance, though severe fatigue spots still mandate hard penalizations in late-inning projections.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
-      "wins": 1.162396978041715,
+      "wins": 1.135001787863704,
       "losses": 0.509451606194059,
       "weight": 1.0,
       "instruction": "Baseline sample size (<5 graded plays).",
-      "net_profit": 80.0518928735627
+      "net_profit": 76.3043181493728
     },
     "platoon_and_lineup_splits": {
-      "wins": 3.0288403385189997,
-      "losses": 9.897653643475588,
-      "weight": 1.13,
-      "instruction": "Stable outperformance (+$-671.09 vs mean). Gradually scaled priority (1.13x).",
-      "net_profit": -671.094505665232
+      "wins": 3.4771167048963787,
+      "losses": 9.751714700069,
+      "weight": 1.18,
+      "instruction": "Stable outperformance (+$-580.33 vs mean). Gradually scaled priority (1.18x).",
+      "net_profit": -580.3266469039679
     },
     "statcast_contact_quality": {
-      "wins": 3.793626531300995,
-      "losses": 2.660918352219401,
+      "wins": 3.777041020518768,
+      "losses": 2.6466287688860675,
       "weight": 1.25,
-      "instruction": "Stable outperformance (+$65.68 vs mean). Gradually scaled priority (1.25x).",
-      "net_profit": 65.6845904565129
+      "instruction": "Stable outperformance (+$64.73 vs mean). Gradually scaled priority (1.25x).",
+      "net_profit": 64.7277847426883
     },
     "multi_source_consensus_and_divergence": {
       "wins": 0.0,
@@ -35,11 +35,11 @@
       "net_profit": 0.0
     },
     "bullpen_depth_and_fatigue": {
-      "wins": 25.13124112510892,
-      "losses": 46.87618329260803,
+      "wins": 25.34723417816976,
+      "losses": 47.31889856439979,
       "weight": 0.75,
-      "instruction": "Underperformance ($-1794.91 vs mean). Gradually scaled de-emphasis (0.75x).",
-      "net_profit": -1794.9112872908763
+      "instruction": "Underperformance ($-1795.66 vs mean). Gradually scaled de-emphasis (0.75x).",
+      "net_profit": -1795.662983734046
     },
     "umpire_and_situational_fatigue": {
       "wins": 0.0,
