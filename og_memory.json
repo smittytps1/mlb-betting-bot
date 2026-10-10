@@ -4,7 +4,7 @@
   "losses": 70.1,
   "win_rate": "40.1%",
   "net_profit_dollars": -1744.09,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "learnings_and_adjustments": "Platoon splits and contact quality continue to demonstrate stable predictive outperformance, effectively justifying their scaled 1.17x and 1.25x priority weightings. Conversely, bullpen fatigue variables are severely underperforming expectation overall but present highly selective fade opportunities when identifying critically taxed units against entirely rested opposing arms.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.0782516984705188,
