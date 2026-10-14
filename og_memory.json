@@ -4,7 +4,7 @@
   "losses": 71.79,
   "win_rate": "39.3%",
   "net_profit_dollars": -1951.07,
-  "learnings_and_adjustments": "Platoon and Lineup Splits continue to demonstrate robust predictive power, prompting a scaled priority weight (1.25x) to exploit mispriced contact quality mismatches. Conversely, bullpen fatigue variables are severely underperforming in recent samples (-$1947.75 net), triggering our automated de-emphasis (0.75x) to properly minimize liability.",
+  "learnings_and_adjustments": "Statcast contact quality and platoon splits continue to demonstrate stable outperformance, warranting their scaled 1.25x priority. Conversely, bullpen depth metrics remain a severe liability (-$1947), requiring their continued 0.75x de-emphasis in high-leverage projection models.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 1.0243391135469926,
