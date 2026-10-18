@@ -4,7 +4,7 @@
   "losses": 72.45,
   "win_rate": "39.2%",
   "net_profit_dollars": -2052.71,
-  "learnings_and_adjustments": "Platoon splits and statcast contact quality metrics continue to demonstrate stable outperformance, justifying their 1.25x scaled weighting. Conversely, bullpen fatigue variables reflect persistent underperformance, validating our active 0.75x de-emphasis to mitigate further liability.",
+  "learnings_and_adjustments": "Contact quality and platoon splits continue to demonstrate stable outperformance, justifying their 1.25x priority weightings in today's multi-variable synthesis. Bullpen depth metrics remain de-emphasized due to historical underperformance, though Cleveland's absolute zero-fatigue status still warrants a substantive positional advantage.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.9966101090485153,
