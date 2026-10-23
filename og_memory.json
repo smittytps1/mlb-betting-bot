@@ -4,7 +4,7 @@
   "losses": 72.96,
   "win_rate": "38.9%",
   "net_profit_dollars": -2127.42,
-  "learnings_and_adjustments": "Maintain balanced bipolar 100-point multi-factor evaluation.",
+  "learnings_and_adjustments": "Recent performance highlights sustained outperformance in platoon splits and contact quality, justifying their scaled priority weightings. Conversely, bullpen fatigue variables remain heavily discounted due to ongoing underperformance and market noise.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.973122157869643,
