@@ -4,7 +4,7 @@
   "losses": 72.96,
   "win_rate": "38.9%",
   "net_profit_dollars": -2127.42,
-  "learnings_and_adjustments": "Recent performance highlights sustained outperformance in platoon splits and contact quality, justifying their scaled priority weightings. Conversely, bullpen fatigue variables remain heavily discounted due to ongoing underperformance and market noise.",
+  "learnings_and_adjustments": "Platoon and lineup splits along with statcast contact quality continue to demonstrate stable outperformance, justifying their scaled 1.25x priority. Conversely, bullpen depth metrics remain strategically de-emphasized at 0.75x following sustained underperformance to avoid overvaluing relief fatigue.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.973122157869643,
