@@ -4,7 +4,7 @@
   "losses": 73.5,
   "win_rate": "38.6%",
   "net_profit_dollars": -2205.09,
-  "learnings_and_adjustments": "Platoon splits and contact quality factors have stabilized outperformance, commanding a sustained 1.25x priority scaling. Conversely, bullpen depth metrics continue to severely underperform against market efficiency, resulting in a cautious 0.75x de-emphasis as systematic recalibration occurs.",
+  "learnings_and_adjustments": "Platoon and Lineup Splits alongside Contact Quality have shown stable outperformance, meriting their gradually scaled priority (1.25x) in the current evaluation model. Conversely, Bullpen Depth and Fatigue have underperformed significantly (-$1957.64 net profit vs mean), resulting in a scaled de-emphasis (0.75x) to minimize exposure to volatile late-inning relief variance.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 0.973122157869643,
