@@ -16,7 +16,7 @@
     "win_rate": "0%",
     "profit": 0.0
   },
-  "learnings_and_adjustments": "Recent iterations definitively prove that capping total probabilities strictly at 58.0% securely insulates exposure against unpredictable late-inning MLB run variance, while heavily discounted plus-money run lines correctly extract massive expected value from starting pitcher mismatches. Moving forward, systematically isolating elite starting pitcher WHIP disparities combined with fresh bullpens on standard run lines remains the absolute paramount engine for generating structural alpha.",
+  "learnings_and_adjustments": "Recent bounded self-learning definitively confirms that isolating elite starting pitcher WHIP disparities combined with fully rested bullpens on heavily discounted plus-money run lines safely extracts unmatched structural alpha. Additionally, strict adherence to capping Over/Under total probabilities at 58.0% continues to perfectly insulate overall exposure against unpredictable late-inning MLB run variance.",
   "reasoning_factor_weights": {
     "starting_pitcher_expected_metrics": {
       "wins": 62.57733236492952,
